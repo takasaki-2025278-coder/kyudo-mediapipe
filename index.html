@@ -238,34 +238,35 @@
             if (results.poseLandmarks) {
                 const landmarks = results.poseLandmarks;
                 
-                // ランドマークの取得
-                let eye_l = landmarks[2];      // 左目
-                let eye_r = landmarks[5];      // 右目
-                let shoulder_l = landmarks[11]; // 左肩
-                let shoulder_r = landmarks[12]; // 右肩
-                let elbow_l = landmarks[13];    // 左肘
-                let elbow_r = landmarks[14];    // 右肘
-                let wrist_l = landmarks[15];    // 左手首
-                let wrist_r = landmarks[16];    // 右手首
+                let eye_l = landmarks[2];
+                let eye_r = landmarks[5];
+                let shoulder_l = landmarks[11];
+                let shoulder_r = landmarks[12];
+                let elbow_l = landmarks[13];
+                let elbow_r = landmarks[14];
+                let wrist_l = landmarks[15];
+                let wrist_r = landmarks[16];
                 
+                // 打ち起こし・待機判定用に目のY座標計算は残す
                 let eye_y = (eye_l.y + eye_r.y) / 2.0;
                 let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
 
-                // 1. 腕の緑色の線を先に描画（点の下に線を配置するため）
-                drawLine(shoulder_r, elbow_r, "green", 4);
-                drawLine(elbow_r, wrist_r, "green", 4);
-                drawLine(shoulder_l, elbow_l, "green", 4);
-                drawLine(elbow_l, wrist_l, "green", 4);
+                // 1. 蛍光緑の線を描画（肩〜肩、肩〜肘〜手首）
+                const neonGreen = "#39ff14";
+                drawLine(shoulder_l, shoulder_r, neonGreen, 4); // 両肩を結ぶ線
+                drawLine(shoulder_r, elbow_r, neonGreen, 4);
+                drawLine(elbow_r, wrist_r, neonGreen, 4);
+                drawLine(shoulder_l, elbow_l, neonGreen, 4);
+                drawLine(elbow_l, wrist_l, neonGreen, 4);
 
-                // 2. 赤い点を描画（目、肩、肘、手首の計8箇所）
-                drawPoint(eye_l, "red", 8);
-                drawPoint(eye_r, "red", 8);
-                drawPoint(shoulder_l, "red", 8);
-                drawPoint(shoulder_r, "red", 8);
-                drawPoint(elbow_l, "red", 8);
-                drawPoint(elbow_r, "red", 8);
-                drawPoint(wrist_l, "red", 8);
-                drawPoint(wrist_r, "red", 8);
+                // 2. 赤い点を小さく（サイズ5）描画（目は描画しない）
+                const dotSize = 5;
+                drawPoint(shoulder_l, "red", dotSize);
+                drawPoint(shoulder_r, "red", dotSize);
+                drawPoint(elbow_l, "red", dotSize);
+                drawPoint(elbow_r, "red", dotSize);
+                drawPoint(wrist_l, "red", dotSize);
+                drawPoint(wrist_r, "red", dotSize);
 
                 if (state === "WAITING") {
                     statusText.innerText = "";
