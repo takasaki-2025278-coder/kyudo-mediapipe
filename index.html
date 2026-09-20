@@ -31,7 +31,7 @@
         
         #main-area { 
             width: 80%; 
-            height: 100%; /* 高さを明示的に指定 */
+            height: 100%;
             display: flex; 
             flex-direction: column; 
             box-sizing: border-box; 
@@ -39,7 +39,7 @@
         
         #video-container { 
             flex: 6;
-            min-height: 0; /* 子要素（Canvas）の膨張を防ぐ */
+            min-height: 0;
             width: 100%; 
             background-color: #ffffff; 
             display: flex; 
@@ -58,19 +58,19 @@
         
         #graph-container {
             flex: 3;
-            min-height: 0; /* 子要素（Canvas）の膨張を防ぐ */
+            min-height: 0;
             width: 100%;
             padding: 10px 20px;
             box-sizing: border-box;
             background-color: #f9f9f9;
             border-top: 1px solid #ddd;
-            display: flex; /* Canvasのサイズ調整を安定させるため追加 */
+            display: flex;
             flex-direction: column;
         }
 
         #graph_canvas {
             width: 100%;
-            flex: 1; /* 親要素に合わせて伸縮させる */
+            flex: 1;
             display: block;
             background-color: #fff;
             border: 1px solid #ccc;
@@ -79,7 +79,7 @@
 
         #controls { 
             flex: 1;
-            min-height: 60px; /* コントロール部分の最小高さを確保 */
+            min-height: 60px;
             width: 100%; padding: 10px 25px; 
             box-sizing: border-box; 
             display: flex; justify-content: space-between; align-items: center; 
@@ -214,13 +214,12 @@
         }
 
         // ==========================================
-        // グラフ描画関数
+        // グラフ描画関数 (プロット機能追加)
         // ==========================================
-        function drawGraph(data) {
+        function drawGraph(data, analysisData = null) {
             const gCanvas = document.getElementById('graph_canvas');
             const gCtx = gCanvas.getContext('2d');
             
-            // Canvasの論理サイズを親要素の表示サイズに合わせる
             if (gCanvas.width !== gCanvas.clientWidth || gCanvas.height !== gCanvas.clientHeight) {
                 gCanvas.width = gCanvas.clientWidth;
                 gCanvas.height = gCanvas.clientHeight;
@@ -230,7 +229,7 @@
             
             if (data.length < 2) return;
             
-            const padding = 15;
+            const padding = 20;
             const width = gCanvas.width - padding * 2;
             const height = gCanvas.height - padding * 2;
             
@@ -238,6 +237,7 @@
             const maxData = Math.max(...data);
             const range = (maxData - minData) === 0 ? 1 : (maxData - minData);
             
+            // 折れ線の描画
             gCtx.beginPath();
             gCtx.strokeStyle = "#007bff";
             gCtx.lineWidth = 2;
@@ -252,6 +252,47 @@
                 }
             }
             gCtx.stroke();
+
+            // 会と引き分け開始のプロット
+            if (analysisData) {
+                gCtx.font = "bold 14px sans-serif";
+                
+                const drawMarker = (frameIdx, label, color) => {
+                    if (frameIdx >= 0 && frameIdx < data.length) {
+                        const x = padding + (frameIdx / (data.length - 1)) * width;
+                        const y = padding + height - ((data[frameIdx] - minData) / range) * height;
+                        
+                        // 縦線（点線）
+                        gCtx.beginPath();
+                        gCtx.setLineDash([5, 5]);
+                        gCtx.strokeStyle = color;
+                        gCtx.lineWidth = 1;
+                        gCtx.moveTo(x, padding);
+                        gCtx.lineTo(x, gCanvas.height - padding);
+                        gCtx.stroke();
+                        gCtx.setLineDash([]); // 点線リセット
+
+                        // ポイント
+                        gCtx.beginPath();
+                        gCtx.arc(x, y, 5, 0, Math.PI * 2);
+                        gCtx.fillStyle = color;
+                        gCtx.fill();
+
+                        // テキストラベル
+                        gCtx.fillText(label, x + 8, padding + 15);
+                    }
+                };
+
+                // 引き分け（大三）のプロット（オレンジ）
+                if (analysisData.actualDaisanFrame) {
+                    drawMarker(analysisData.actualDaisanFrame, "大三", "#ff8800");
+                }
+                
+                // 会のプロット（赤）
+                if (analysisData.kaiStartFrame) {
+                    drawMarker(analysisData.kaiStartFrame, "会", "red");
+                }
+            }
         }
 
         // ==========================================
@@ -271,6 +312,7 @@
         let frameIndex = 0;
         let hasReachedKaiCandidate = false; 
         let recordingStartTime = 0; 
+        let lastAnalysisResult = null; // 解析結果を保持する変数
 
         const pose = new Pose({locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
@@ -346,9 +388,11 @@
                     if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
                         triggerCounter += 1;
                         if (triggerCounter >= 3) {
+                            // ★ 新しい測定が始まるタイミングでデータをリセット
                             state = "RECORDING";
                             recordedX = [];
                             recordedY = [];
+                            lastAnalysisResult = null;
                             hasReachedKaiCandidate = false;
                             releaseCounter = 0;
                             recordingStartTime = performance.now();
@@ -373,7 +417,6 @@
                         }
                         
                         if (hasReachedKaiCandidate) {
-                            // 【変更点】 右肘、右手首、左肩 の順序関係をチェック
                             let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_l.x) || 
                                           (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_l.x);
                             
@@ -397,6 +440,12 @@
                                     const li = document.createElement('li');
                                     li.innerText = `${result.kaiSeconds.toFixed(2)} 秒`;
                                     recordList.prepend(li);
+
+                                    // ★ 解析結果を保存してグラフプロットに使用
+                                    lastAnalysisResult = {
+                                        actualDaisanFrame: result.actualDaisanFrame,
+                                        kaiStartFrame: result.kaiStartFrame
+                                    };
                                 }
                             }
                         }
@@ -405,15 +454,15 @@
                 
                 else if (state === "DONE") {
                     if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
+                        // ★ グラフとデータは消さずに状態だけ戻す
                         state = "WAITING";
-                        recordedX = [];
-                        recordedY = [];
                         triggerCounter = 0;
                         releaseCounter = 0;
                     }
                 }
 
-                drawGraph(recordedX);
+                // グラフを描画（プロット用の解析データも渡す）
+                drawGraph(recordedX, lastAnalysisResult);
             }
             canvasCtx.restore();
             frameIndex++;
@@ -431,10 +480,11 @@
             state = "WAITING";
             recordedX = [];
             recordedY = [];
+            lastAnalysisResult = null;
             triggerCounter = 0;
             releaseCounter = 0;
             statusText.innerText = "";
-            drawGraph(recordedX); 
+            drawGraph(recordedX, lastAnalysisResult); 
         });
     </script>
 </body>
