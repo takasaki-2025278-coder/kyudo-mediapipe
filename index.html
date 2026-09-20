@@ -17,7 +17,6 @@
             overflow: hidden; 
         }
         
-        /* 左側の履歴リストエリア (画面の20%) */
         #sidebar { 
             width: 20%; 
             background-color: #f8f9fa; 
@@ -29,7 +28,6 @@
         ul { list-style: none; padding: 0; margin: 0; }
         li { padding: 12px 0; border-bottom: 1px solid #ddd; font-size: 1rem; font-weight: bold; text-align: center;}
         
-        /* 右側のメインエリア (画面の80%) */
         #main-area { 
             width: 80%; 
             display: flex; 
@@ -37,11 +35,11 @@
             box-sizing: border-box; 
         }
         
-        /* 動画コンテナ：カメラの比率を保ちつつ最大化 */
+        /* 余白を白に変更 */
         #video-container { 
-            flex: 1; /* 余った高さをすべて使う */
+            flex: 1; 
             width: 100%; 
-            background-color: #000; 
+            background-color: #ffffff; 
             display: flex; 
             justify-content: center; 
             align-items: center;
@@ -50,11 +48,10 @@
         canvas { 
             max-width: 100%; 
             max-height: 100%; 
-            object-fit: contain; /* 歪めずに全体を表示 */
-            transform: scaleX(-1); /* 鏡像反転 */
+            object-fit: contain; 
+            transform: scaleX(-1); 
         }
         
-        /* ステータスとボタンのエリア */
         #controls { 
             width: 100%; padding: 15px 25px; 
             box-sizing: border-box; 
@@ -219,7 +216,6 @@
         }
 
         pose.onResults((results) => {
-            // カメラから送られてくる実際の映像サイズにキャンバスを自動で合わせる（アスペクト比の歪みを防止）
             if (canvasElement.width !== results.image.width || canvasElement.height !== results.image.height) {
                 canvasElement.width = results.image.width;
                 canvasElement.height = results.image.height;
@@ -245,7 +241,7 @@
                 drawPoint(shoulder_l, "red", 10);
 
                 if (state === "WAITING") {
-                    statusText.innerText = ""; // 待機中は何も表示しない
+                    statusText.innerText = "";
                     
                     if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
                         triggerCounter += 1;
@@ -262,8 +258,7 @@
                 }
                 
                 else if (state === "RECORDING") {
-                    // 会に到達するまでは「記録中」、到達したら「会」
-                    statusText.innerText = hasReachedKaiCandidate ? "会" : "記録中";
+                    statusText.innerText = "記録中"; // 「会」の表示を消して「記録中」に統一
                     
                     recordedX.push(wrist_r.x);
                     recordedY.push(wrist_r.y);
@@ -280,7 +275,7 @@
                             let diff_spark = Math.abs(recordedX[recordedX.length - 1] - recordedX[recordedX.length - 3]);
                             if (diff_spark > (shoulder_width * 0.15)) {
                                 state = "DONE";
-                                statusText.innerText = ""; // 完了後もテキストは空にする
+                                statusText.innerText = ""; 
                                 
                                 let endTime = performance.now();
                                 let totalSec = (endTime - recordingStartTime) / 1000.0;
@@ -289,7 +284,6 @@
                                 let result = calculateKaiTimeHybrid(recordedX, recordedY, actualFps);
                                 
                                 if (result.kaiSeconds !== null) {
-                                    // リストに「〇.〇〇 秒」のみを追加
                                     const li = document.createElement('li');
                                     li.innerText = `${result.kaiSeconds.toFixed(2)} 秒`;
                                     recordList.prepend(li);
@@ -298,12 +292,21 @@
                         }
                     }
                 }
+                
+                // 完了状態のとき、両手が目の位置より下がったら自動で待機状態に戻る
+                else if (state === "DONE") {
+                    if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
+                        state = "WAITING";
+                        recordedX = [];
+                        recordedY = [];
+                        triggerCounter = 0;
+                    }
+                }
             }
             canvasCtx.restore();
             frameIndex++;
         });
 
-        // カメラ設定：あえてwidth/heightを固定せず、デバイス側の解像度に委ねる
         const camera = new Camera(videoElement, {
             onFrame: async () => {
                 await pose.send({image: videoElement});
@@ -311,7 +314,9 @@
         });
         camera.start();
 
+        // リセットボタン：記録リストを全消去し、状態もリセット
         document.getElementById('reset-btn').addEventListener('click', () => {
+            recordList.innerHTML = ''; // リストのHTMLを空にする
             state = "WAITING";
             recordedX = [];
             recordedY = [];
