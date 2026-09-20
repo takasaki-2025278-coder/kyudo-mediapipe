@@ -1,106 +1,164 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-  <base target="_top">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <style>
-    body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: sans-serif; }
-    #container { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
-    video, canvas { position: absolute; width: 100%; height: 100%; object-fit: cover; }
-    canvas { z-index: 10; }
-    #status-bar { position: absolute; top: 20px; left: 20px; z-index: 20; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; }
-  </style>
-  
-  <!-- ご自身のGitHub PagesのURL（完璧です！） -->
-  <script src="https://takasaki-2025278-coder.github.io/kyudo-mediapipe/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://takasaki-2025278-coder.github.io/kyudo-mediapipe/control_utils.js" crossorigin="anonymous"></script>
-  <script src="https://takasaki-2025278-coder.github.io/kyudo-mediapipe/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://takasaki-2025278-coder.github.io/kyudo-mediapipe/pose.js" crossorigin="anonymous"></script>
+    <meta charset="UTF-8">
+    <title>弓道 会の計測システム (Web版)</title>
+    <!-- MediaPipeの読み込み -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; background-color: #222; color: white;}
+        canvas { border: 2px solid #fff; max-width: 100%; height: auto; }
+        #status-text { font-size: 24px; font-weight: bold; margin: 10px 0; color: #00ff00; }
+        button { font-size: 18px; padding: 10px 20px; margin: 10px; cursor: pointer; }
+    </style>
 </head>
 <body>
-  <div id="container">
-    <video class="input_video" autoplay playsinline></video>
-    <canvas class="output_canvas"></canvas>
-    <div id="status-bar">AIモデル読み込み中...</div>
-  </div>
 
-  <script>
-    const videoElement = document.querySelector('.input_video');
-    const canvasElement = document.querySelector('.output_canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-    const statusBar = document.getElementById('status-bar');
+    <h2>弓道 会の計測システム</h2>
+    <div id="status-text">Status: WAITING (Raise hands to start)</div>
+    
+    <!-- 映像は裏で処理し、Canvasに結果を描画します -->
+    <video id="input_video" style="display:none;" autoplay playsinline></video>
+    <canvas id="output_canvas" width="640" height="480"></canvas>
 
-    // ==========================================
-    // 1. MediaPipe Pose の設定
-    // ==========================================
-    const pose = new Pose({locateFile: (file) => {
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
-    }});
+    <button id="reset-btn">システムをリセット (Reset)</button>
 
-    pose.setOptions({
-      modelComplexity: 0,
-      smoothLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusText = document.getElementById('status-text');
 
-    pose.onResults(onResults);
+        // --- 状態管理用変数（Pythonから移植） ---
+        let state = "WAITING"; 
+        let triggerCounter = 0; 
+        let recordedX = [];
+        let recordedY = [];
+        let frameIndex = 0;
+        let hasReachedKaiCandidate = false; 
+        let kaiSecDisplay = null;
+        let recordingStartTime = 0; // 簡易的な時間計測用
 
-    function onResults(results) {
-      statusBar.innerText = "認識中...";
-      
-      canvasElement.width = videoElement.videoWidth;
-      canvasElement.height = videoElement.videoHeight;
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-      if (results.poseLandmarks) {
-        // 右手首(16)
-        const rightWrist = results.poseLandmarks[16];
+        // --- MediaPipe Poseの初期化 ---
+        const pose = new Pose({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+        }});
         
-        canvasCtx.fillStyle = "red";
-        canvasCtx.beginPath();
-        canvasCtx.arc(rightWrist.x * canvasElement.width, rightWrist.y * canvasElement.height, 8, 0, 2 * Math.PI);
-        canvasCtx.fill();
-      } else {
-        statusBar.innerText = "人が映っていません";
-      }
-    }
+        pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
 
-    // ==========================================
-    // 2. カメラ起動とループ処理
-    // ==========================================
-    let lastVideoTime = -1;
+        // --- 毎フレーム呼ばれる処理（Pythonのwhileループの中身） ---
+        pose.onResults((results) => {
+            // 画面をクリアしてカメラ映像を描画
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-    async function startCamera() {
-      statusBar.innerText = "カメラの許可を待っています...";
-      const constraints = {
-        video: { 
-          facingMode: 'environment',
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        }
-      };
-      
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        videoElement.srcObject = stream;
-        videoElement.addEventListener("loadeddata", predictWebcam);
-      } catch (err) {
-        statusBar.innerText = "カメラの起動に失敗しました。";
-        console.error(err);
-      }
-    }
+            if (results.poseLandmarks) {
+                const landmarks = results.poseLandmarks;
+                
+                // 座標の取得 (0.0〜1.0で返ってくるためCanvasサイズをかける)
+                // 16: 右手首, 15: 左手首, 0: 鼻, 11: 左肩, 12: 右肩
+                let wrist_r_x = landmarks[16].x;
+                let wrist_r_y = landmarks[16].y;
+                let nose_y = landmarks[0].y;
+                let shoulder_width = Math.abs(landmarks[11].x - landmarks[12].x);
 
-    async function predictWebcam() {
-      if (lastVideoTime !== videoElement.currentTime) {
-        lastVideoTime = videoElement.currentTime;
-        await pose.send({image: videoElement});
-      }
-      window.requestAnimationFrame(predictWebcam);
-    }
+                // 右手首に赤い点を描画
+                canvasCtx.beginPath();
+                canvasCtx.arc(wrist_r_x * canvasElement.width, wrist_r_y * canvasElement.height, 8, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = "red";
+                canvasCtx.fill();
 
-    startCamera();
-  </script>
+                // --- 状態1：待機中 ---
+                if (state === "WAITING") {
+                    statusText.innerText = "Status: WAITING (Raise hands to start)";
+                    if (wrist_r_y < nose_y) {
+                        triggerCounter += 1;
+                        if (triggerCounter >= 3) {
+                            state = "RECORDING";
+                            recordedX = [];
+                            recordedY = [];
+                            hasReachedKaiCandidate = false;
+                            recordingStartTime = performance.now(); // 簡易的な開始時間
+                            console.log(`[${frameIndex}フレーム] 打ち起こしを検知。記録開始。`);
+                        }
+                    } else {
+                        triggerCounter = 0;
+                    }
+                }
+                
+                // --- 状態2：記録中 ---
+                else if (state === "RECORDING") {
+                    statusText.innerText = `Status: RECORDING... (Frames: ${recordedX.length})`;
+                    recordedX.push(wrist_r_x);
+                    recordedY.push(wrist_r_y);
+                    
+                    if (recordedX.length > 30) {
+                        // 直近15フレームのXの幅を計算
+                        let recent_x = recordedX.slice(-15);
+                        let recent_x_range = Math.max(...recent_x) - Math.min(...recent_x);
+                        
+                        if (recent_x_range < (shoulder_width * 0.05)) {
+                            hasReachedKaiCandidate = true;
+                            statusText.innerText = "Status: KAI (Holding...)";
+                        }
+                        
+                        if (hasReachedKaiCandidate) {
+                            // 離れの検知 (3フレーム前との差分)
+                            let diff_spark = Math.abs(recordedX[recordedX.length - 1] - recordedX[recordedX.length - 3]);
+                            if (diff_spark > (shoulder_width * 0.15)) {
+                                state = "DONE";
+                                console.log(`[${frameIndex}フレーム] 離れを検知。`);
+                                
+                                // ★今回は簡易的に「記録開始〜離れまでの秒数」を計算して表示します
+                                let endTime = performance.now();
+                                let totalSec = (endTime - recordingStartTime) / 1000.0;
+                                kaiSecDisplay = totalSec;
+                                
+                                statusText.innerText = `SUCCESS! Total Time: ${kaiSecDisplay.toFixed(2)} sec`;
+                            }
+                        }
+                    }
+                }
+                
+                // --- 状態3：計測完了 ---
+                else if (state === "DONE") {
+                    if (kaiSecDisplay !== null) {
+                        statusText.innerText = `Result: ${kaiSecDisplay.toFixed(2)} sec (Press Reset)`;
+                    }
+                }
+            }
+            canvasCtx.restore();
+            frameIndex++;
+        });
+
+        // --- Webカメラの起動 ---
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await pose.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+
+        // --- リセットボタンの処理 ---
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            state = "WAITING";
+            recordedX = [];
+            recordedY = [];
+            kaiSecDisplay = null;
+            triggerCounter = 0;
+            statusText.innerText = "Status: WAITING (Raise hands to start)";
+            console.log("システムをリセットしました。");
+        });
+    </script>
 </body>
 </html>
