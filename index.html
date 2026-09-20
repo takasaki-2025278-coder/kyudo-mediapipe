@@ -320,21 +320,23 @@
             isPaused = !isPaused;
 
             if (isPaused) {
-                // 記録途中で停止した場合は、その計測を破棄して待機状態へ戻す
+                // 測定途中のデータを破棄し、会の判定だけを停止する
                 state = "WAITING";
                 recordedX = [];
                 recordedY = [];
                 recordedTimes = [];
                 lastAnalysisResult = null;
+                hasReachedKaiCandidate = false;
+                recordingStartTime = 0;
                 triggerCounter = 0;
                 releaseCounter = 0;
                 drawGraph(recordedX, lastAnalysisResult);
-
                 stopBtn.innerText = "再開";
-                camera.stop();
             } else {
                 stopBtn.innerText = "停止";
-                camera.start();
+                state = "WAITING";
+                triggerCounter = 0;
+                releaseCounter = 0;
             }
         });
 
@@ -400,6 +402,12 @@
         drawPoint(elbow_r, "red", dotSize);
         drawPoint(wrist_l, "red", dotSize);
         drawPoint(wrist_r, "red", dotSize);
+
+        // 停止中はカメラ・Pose・骨格表示を継続し、会の測定判定だけ停止する
+        if (isPaused) {
+            canvasCtx.restore();
+            return;
+        }
         
         if (state === "WAITING") {
             releaseCounter = 0;
