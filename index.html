@@ -35,7 +35,6 @@
             box-sizing: border-box; 
         }
         
-        /* 余白を白に変更 */
         #video-container { 
             flex: 1; 
             width: 100%; 
@@ -208,11 +207,22 @@
             minTrackingConfidence: 0.5
         });
 
+        // 点を描画する関数
         function drawPoint(landmark, color, size) {
             canvasCtx.beginPath();
             canvasCtx.arc(landmark.x * canvasElement.width, landmark.y * canvasElement.height, size, 0, 2 * Math.PI);
             canvasCtx.fillStyle = color;
             canvasCtx.fill();
+        }
+
+        // 線を描画する関数
+        function drawLine(p1, p2, color, width) {
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+            canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+            canvasCtx.strokeStyle = color;
+            canvasCtx.lineWidth = width;
+            canvasCtx.stroke();
         }
 
         pose.onResults((results) => {
@@ -228,17 +238,34 @@
             if (results.poseLandmarks) {
                 const landmarks = results.poseLandmarks;
                 
-                let wrist_r = landmarks[16]; 
-                let wrist_l = landmarks[15]; 
-                let shoulder_r = landmarks[12]; 
-                let shoulder_l = landmarks[11]; 
-                let eye_y = (landmarks[2].y + landmarks[5].y) / 2.0;
+                // ランドマークの取得
+                let eye_l = landmarks[2];      // 左目
+                let eye_r = landmarks[5];      // 右目
+                let shoulder_l = landmarks[11]; // 左肩
+                let shoulder_r = landmarks[12]; // 右肩
+                let elbow_l = landmarks[13];    // 左肘
+                let elbow_r = landmarks[14];    // 右肘
+                let wrist_l = landmarks[15];    // 左手首
+                let wrist_r = landmarks[16];    // 右手首
+                
+                let eye_y = (eye_l.y + eye_r.y) / 2.0;
                 let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
 
-                drawPoint(wrist_r, "red", 10);
-                drawPoint(wrist_l, "red", 10);
-                drawPoint(shoulder_r, "red", 10);
-                drawPoint(shoulder_l, "red", 10);
+                // 1. 腕の緑色の線を先に描画（点の下に線を配置するため）
+                drawLine(shoulder_r, elbow_r, "green", 4);
+                drawLine(elbow_r, wrist_r, "green", 4);
+                drawLine(shoulder_l, elbow_l, "green", 4);
+                drawLine(elbow_l, wrist_l, "green", 4);
+
+                // 2. 赤い点を描画（目、肩、肘、手首の計8箇所）
+                drawPoint(eye_l, "red", 8);
+                drawPoint(eye_r, "red", 8);
+                drawPoint(shoulder_l, "red", 8);
+                drawPoint(shoulder_r, "red", 8);
+                drawPoint(elbow_l, "red", 8);
+                drawPoint(elbow_r, "red", 8);
+                drawPoint(wrist_l, "red", 8);
+                drawPoint(wrist_r, "red", 8);
 
                 if (state === "WAITING") {
                     statusText.innerText = "";
@@ -258,7 +285,7 @@
                 }
                 
                 else if (state === "RECORDING") {
-                    statusText.innerText = "記録中"; // 「会」の表示を消して「記録中」に統一
+                    statusText.innerText = "記録中";
                     
                     recordedX.push(wrist_r.x);
                     recordedY.push(wrist_r.y);
@@ -293,7 +320,6 @@
                     }
                 }
                 
-                // 完了状態のとき、両手が目の位置より下がったら自動で待機状態に戻る
                 else if (state === "DONE") {
                     if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
                         state = "WAITING";
@@ -314,9 +340,8 @@
         });
         camera.start();
 
-        // リセットボタン：記録リストを全消去し、状態もリセット
         document.getElementById('reset-btn').addEventListener('click', () => {
-            recordList.innerHTML = ''; // リストのHTMLを空にする
+            recordList.innerHTML = ''; 
             state = "WAITING";
             recordedX = [];
             recordedY = [];
