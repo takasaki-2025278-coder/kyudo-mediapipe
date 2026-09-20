@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>弓道 会の計測システム</title>
+    <script src="./vendor/mediapipe/camera_utils.js"></script>
+    <script src="./vendor/mediapipe/pose/pose.js"></script>
+    <style>
+        body { 
+            margin: 0; padding: 0; 
+            background-color: #ffffff; color: #000000; 
+            font-family: sans-serif; 
+            display: flex; width: 100vw; height: 100vh; 
+            overflow: hidden; 
+        }
+        
+        #sidebar { 
+            width: 20%; 
+            height: 100%;
+            background-color: #f8f9fa; 
+            border-right: 1px solid #ccc; 
+            padding: 10px; 
+            box-sizing: border-box; 
+            overflow-y: auto; 
+        }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { padding: 12px 0; border-bottom: 1px solid #ddd; font-size: 1rem; font-weight: bold; text-align: center;}
+        
+        #main-area { 
+            width: 80%; 
+            height: 100%;
+            display: flex; 
+            flex-direction: column; 
+            box-sizing: border-box; 
+        }
+        
+        #video-container { 
+            flex: 6;
+            min-height: 0;
+            width: 100%; 
+            background-color: #ffffff; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        #output_canvas { 
+            max-width: 100%; 
+            max-height: 100%; 
+            object-fit: contain; 
+            transform: scaleX(-1); 
+        }
+        
+        #graph-container {
+            flex: 3;
+            min-height: 0;
+            width: 100%;
+            padding: 10px 20px;
+            box-sizing: border-box;
+            background-color: #f9f9f9;
+            border-top: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #graph_canvas {
+            width: 100%;
+            flex: 1;
+            display: block;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        
+        #controls {
+            flex: 1;
+            min-height: 60px;
+            width: 100%;
+            padding: 10px 25px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            background-color: #fff;
+            border-top: 1px solid #ddd;
+        }
+        button { 
+            font-size: 1.2rem; padding: 10px 30px; cursor: pointer; 
+            background-color: #333; color: #fff; 
+            border: none; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        button:active { background-color: #555; transform: translateY(2px); box-shadow: none; }
+    </style>
+</head>
+
+<body>
+    <div id="sidebar">
+        <ul id="record-list"></ul>
+    </div>
+    <div id="main-area">
+        <div id="video-container">
+            <video id="input_video" style="display:none;" autoplay playsinline></video>
+            <canvas id="output_canvas"></canvas>
+        </div>
+        <div id="graph-container">
+            <canvas id="graph_canvas"></canvas>
+        </div>
+        <div id="controls">
+            <div>
+                <button id="stop-btn">停止</button>
+                <button id="reset-btn">リセット</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        // ==========================================
+        // 解析アルゴリズム関数（定数→直線→定数の総当たり法）
+        // ==========================================
+        function movingAverage(data, windowSize) {
+            let result = [];
+            for (let i = 0; i <= data.length - windowSize; i++) {
+        let sum = 0;
+        for (let j = 0; j < windowSize; j++) {
+            sum += data[i + j];
+        }
+        result.push(sum / windowSize);
+            }
+            return result;
+        }
+        
+        function solve3x3(A, b) {
+            const m = A.map((row, i) => [row[0], row[1], row[2], b[i]]);
+
+            for (let col = 0; col < 3; col++) {
+                let pivot = col;
+                for (let row = col + 1; row < 3; row++) {
+                    if (Math.abs(m[row][col]) > Math.abs(m[pivot][col])) {
+                        pivot = row;
+                    }
+                }
+
+                if (Math.abs(m[pivot][col]) < 1e-12) {
+                    throw new Error("Singular matrix");
+                }
+
+                [m[col], m[pivot]] = [m[pivot], m[col]];
+
+                const divisor = m[col][col];
+                for (let j = col; j < 4; j++) {
+                    m[col][j] /= divisor;
+                }
+
+                for (let row = 0; row < 3; row++) {
+                    if (row === col) continue;
+                    const factor = m[row][col];
+                    for (let j = col; j < 4; j++) {
+                        m[row][j] -= factor * m[col][j];
+                    }
+                }
+            }
+
+            return [m[0][3], m[1][3], m[2][3]];
+        }
+
+        function polyfit2(x, y) {
+            let s0 = x.length;
+            let s1 = 0;
+            let s2 = 0;
+            let s3 = 0;
+            let s4 = 0;
+            let t0 = 0;
+            let t1 = 0;
+            let t2 = 0;
+
+            for (let i = 0; i < x.length; i++) {
+                const xi = x[i];
+                const yi = y[i];
+                const x2 = xi * xi;
+
+                s1 += xi;
+                s2 += x2;
+                s3 += x2 * xi;
+                s4 += x2 * x2;
+                t0 += x2 * yi;
+                t1 += xi * yi;
+                t2 += yi;
+            }
+
+            return solve3x3(
+                [
+                    [s4, s3, s2],
+                    [s3, s2, s1],
+                    [s2, s1, s0]
+                ],
+                [t0, t1, t2]
+            );
+        }
+        
+        function calcPolyError(x, y, coeffs) {
+            const [a, b, c] = coeffs;
+            let error = 0;
+            for (let i = 0; i < x.length; i++) {
+        let pred = a * x[i] * x[i] + b * x[i] + c;
+        error += Math.pow(y[i] - pred, 2);
+            }
+            return error;
+        }
+        
+        function calculateKaiTimeHybrid(xData, yData, timesData) {
+            const windowSize = 5;
+            if (xData.length < windowSize * 2) {
+                return { kaiSeconds: null, error: "Data too short" };
+            }
+
+            const smoothedX = movingAverage(xData, windowSize);
+            const smoothedY = movingAverage(yData, windowSize);
+            const offset = Math.floor(windowSize / 2);
+
+            // 大三の位置は従来と同じ方法で推定する
+            const kaiLen = Math.max(10, Math.min(30, Math.floor(smoothedX.length * 0.15)));
+            const kaiSlice = smoothedX.slice(-kaiLen);
+            const kaiApproxX = kaiSlice.reduce((sum, val) => sum + val, 0) / kaiSlice.length;
+
+            const searchRange = Math.floor(smoothedX.length / 2);
+            let maxDiff = -1;
+            let daisanIdx = 0;
+
+            for (let i = 0; i < searchRange; i++) {
+                const diff = Math.abs(smoothedX[i] - kaiApproxX);
+                if (diff > maxDiff) {
+                    maxDiff = diff;
+                    daisanIdx = i;
+                }
+            }
+
+            const analysisY = smoothedY.slice(daisanIdx);
+
+            // 移動平均後の各点に対応する実時間
+            const analysisTimes = [];
+            for (let i = daisanIdx; i < smoothedY.length; i++) {
+                analysisTimes.push(timesData[i + offset]);
+            }
+
+            const n = analysisY.length;
+            if (n < 3) {
+                return { kaiSeconds: null, error: "Not enough frames for analysis" };
+            }
+
+            /*
+             * 区分モデル
+             *
+             * 第1区間: y = c1
+             * 第2区間: (tp, c1) と (tq, c2) を結ぶ直線
+             * 第3区間: y = c2
+             *
+             * p, q を全探索し、c1, c2 は各 p, q に対する
+             * 誤差二乗和最小の値を連立一次方程式から求める。
+             */
+            let bestError = Infinity;
+            let bestP = -1;
+            let bestQ = -1;
+            let bestC1 = 0;
+            let bestC2 = 0;
+
+            // p, q に最低長などの境界条件を設けず、全ての分割を総当たり
+            // 各3区間が少なくとも1点を持つよう、1 <= p < q <= n-1 とする。
+            for (let p = 1; p < n - 1; p++) {
+                for (let q = p + 1; q <= n - 1; q++) {
+                    const tp = analysisTimes[p];
+                    const tq = analysisTimes[q];
+
+                    if (!Number.isFinite(tp) || !Number.isFinite(tq) || tq <= tp) {
+                        continue;
+                    }
+
+                    // E = Σ(y_i - a_i*c1 - b_i*c2)^2
+                    let A11 = 0;
+                    let A12 = 0;
+                    let A22 = 0;
+                    let B1 = 0;
+                    let B2 = 0;
+
+                    for (let i = 0; i < n; i++) {
+                        let a;
+                        let b;
+
+                        if (i < p) {
+                            a = 1;
+                            b = 0;
+                        } else if (i < q) {
+                            const r = (analysisTimes[i] - tp) / (tq - tp);
+                            a = 1 - r;
+                            b = r;
+                        } else {
+                            a = 0;
+                            b = 1;
+                        }
+
+                        const y = analysisY[i];
+
+                        A11 += a * a;
+                        A12 += a * b;
+                        A22 += b * b;
+                        B1 += a * y;
+                        B2 += b * y;
+                    }
+
+                    const det = A11 * A22 - A12 * A12;
+                    if (Math.abs(det) < 1e-12) {
+                        continue;
+                    }
+
+                    const c1 = (B1 * A22 - A12 * B2) / det;
+                    const c2 = (A11 * B2 - A12 * B1) / det;
+
+                    let totalError = 0;
+
+                    for (let i = 0; i < n; i++) {
+                        let predicted;
+
+                        if (i < p) {
+                            predicted = c1;
+                        } else if (i < q) {
+                            const r = (analysisTimes[i] - tp) / (tq - tp);
+                            predicted = (1 - r) * c1 + r * c2;
+                        } else {
+                            predicted = c2;
+                        }
+
+                        const diff = analysisY[i] - predicted;
+                        if (!Number.isFinite(diff)) {
+                            totalError = Infinity;
+                            break;
+                        }
+                        totalError += diff * diff;
+                    }
+
+                    if (totalError < bestError) {
+                        bestError = totalError;
+                        bestP = p;
+                        bestQ = q;
+                        bestC1 = c1;
+                        bestC2 = c2;
+                    }
+                }
+            }
+
+            if (bestP < 0 || bestQ < 0) {
+                return { kaiSeconds: null, error: "No valid segmentation" };
+            }
+
+            const actualDaisanFrame = daisanIdx + offset;
+            const kaiStartFrame = daisanIdx + bestQ + offset;
+
+            if (kaiStartFrame >= timesData.length) {
+                return { kaiSeconds: null, error: "Invalid frame index" };
+            }
+
+            const kaiStartTimestamp = timesData[kaiStartFrame];
+            const kaiEndTimestamp = timesData[timesData.length - 1];
+            const kaiSeconds = (kaiEndTimestamp - kaiStartTimestamp) / 1000.0;
+
+            return {
+                actualDaisanFrame,
+                kaiStartFrame,
+                kaiSeconds,
+                boundaryP: bestP,
+                boundaryQ: bestQ,
+                c1: bestC1,
+                c2: bestC2,
+                fitError: bestError
+            };
+        }
+
+        // ==========================================
+        // グラフ描画関数
+        // ==========================================
+        function drawGraph(data, analysisData = null) {
+            const gCanvas = document.getElementById('graph_canvas');
+            const gCtx = gCanvas.getContext('2d');
+            
+            if (gCanvas.width !== gCanvas.clientWidth || gCanvas.height !== gCanvas.clientHeight) {
+        gCanvas.width = gCanvas.clientWidth;
+        gCanvas.height = gCanvas.clientHeight;
+            }
+            
+            gCtx.clearRect(0, 0, gCanvas.width, gCanvas.height);
+            
+            if (data.length < 2) return;
+            
+            const padding = 20;
+            const width = gCanvas.width - padding * 2;
+            const height = gCanvas.height - padding * 2;
+            
+            const minData = Math.min(...data);
+            const maxData = Math.max(...data);
+            const range = (maxData - minData) === 0 ? 1 : (maxData - minData);
+            
+            gCtx.beginPath();
+            gCtx.strokeStyle = "#007bff";
+            gCtx.lineWidth = 2;
+            
+            for (let i = 0; i < data.length; i++) {
+        const x = padding + (i / (data.length - 1)) * width;
+        const y = padding + height - ((data[i] - minData) / range) * height;
+        if (i === 0) {
+            gCtx.moveTo(x, y);
+        } else {
+            gCtx.lineTo(x, y);
+        }
+            }
+            gCtx.stroke();
+        
+            if (analysisData) {
+        gCtx.font = "bold 14px sans-serif";
+        
+        const drawMarker = (frameIdx, label, color) => {
+            if (frameIdx >= 0 && frameIdx < data.length) {
+                const x = padding + (frameIdx / (data.length - 1)) * width;
+                const y = padding + height - ((data[frameIdx] - minData) / range) * height;
+                
+                gCtx.beginPath();
+                gCtx.setLineDash([5, 5]);
+                gCtx.strokeStyle = color;
+                gCtx.lineWidth = 1;
+                gCtx.moveTo(x, padding);
+                gCtx.lineTo(x, gCanvas.height - padding);
+                gCtx.stroke();
+                gCtx.setLineDash([]);
+        
+                gCtx.beginPath();
+                gCtx.arc(x, y, 5, 0, Math.PI * 2);
+                gCtx.fillStyle = color;
+                gCtx.fill();
+        
+                gCtx.fillText(label, x + 8, padding + 15);
+            }
+        };
+        
+        if (analysisData.actualDaisanFrame) {
+            drawMarker(analysisData.actualDaisanFrame, "大三", "#ff8800");
+        }
+        
+        if (analysisData.kaiStartFrame) {
+            drawMarker(analysisData.kaiStartFrame, "会", "red");
+        }
+            }
+        }
+        
+        // ==========================================
+        // メイン処理
+        // ==========================================
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const recordList = document.getElementById('record-list');
+        
+        let state = "WAITING"; 
+        let triggerCounter = 0; 
+        let releaseCounter = 0; 
+        let recordedX = [];
+        let recordedY = [];
+        let recordedTimes = []; // ★ タイムスタンプ配列
+        let hasReachedKaiCandidate = false; 
+        let recordingStartTime = 0; 
+        let lastAnalysisResult = null;
+        let isPaused = false;
+        
+        const pose = new Pose({locateFile: (file) => {
+            return `./vendor/mediapipe/pose/${file}`;
+        }});
+        const stopBtn = document.getElementById('stop-btn');
+        stopBtn.addEventListener('click', () => {
+            isPaused = !isPaused;
+
+            if (isPaused) {
+                // 測定途中のデータを破棄し、会の判定だけを停止する
+                state = "WAITING";
+                recordedX = [];
+                recordedY = [];
+                recordedTimes = [];
+                lastAnalysisResult = null;
+                hasReachedKaiCandidate = false;
+                recordingStartTime = 0;
+                triggerCounter = 0;
+                releaseCounter = 0;
+                drawGraph(recordedX, lastAnalysisResult);
+                stopBtn.innerText = "再開";
+            } else {
+                stopBtn.innerText = "停止";
+                state = "WAITING";
+                triggerCounter = 0;
+                releaseCounter = 0;
+            }
+        });
+
+        pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        
+        function drawPoint(landmark, color, size) {
+            canvasCtx.beginPath();
+            canvasCtx.arc(landmark.x * canvasElement.width, landmark.y * canvasElement.height, size, 0, 2 * Math.PI);
+            canvasCtx.fillStyle = color;
+            canvasCtx.fill();
+        }
+        
+        function drawLine(p1, p2, color, width) {
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+            canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+            canvasCtx.strokeStyle = color;
+            canvasCtx.lineWidth = width;
+            canvasCtx.stroke();
+        }
+        
+        pose.onResults((results) => {
+            if (canvasElement.width !== results.image.width || canvasElement.height !== results.image.height) {
+        canvasElement.width = results.image.width;
+        canvasElement.height = results.image.height;
+            }
+        
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        
+            if (results.poseLandmarks) {
+        const landmarks = results.poseLandmarks;
+        
+        let eye_l = landmarks[2];
+        let eye_r = landmarks[5];
+        let shoulder_l = landmarks[11];
+        let shoulder_r = landmarks[12];
+        let elbow_l = landmarks[13];
+        let elbow_r = landmarks[14];
+        let wrist_l = landmarks[15];
+        let wrist_r = landmarks[16];
+        
+        let eye_y = (eye_l.y + eye_r.y) / 2.0;
+        let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
+        
+        const neonGreen = "#39ff14";
+        drawLine(shoulder_l, shoulder_r, neonGreen, 4); 
+        drawLine(shoulder_r, elbow_r, neonGreen, 4);
+        drawLine(elbow_r, wrist_r, neonGreen, 4);
+        drawLine(shoulder_l, elbow_l, neonGreen, 4);
+        drawLine(elbow_l, wrist_l, neonGreen, 4);
+        
+        const dotSize = 5;
+        drawPoint(shoulder_l, "red", dotSize);
+        drawPoint(shoulder_r, "red", dotSize);
+        drawPoint(elbow_l, "red", dotSize);
+        drawPoint(elbow_r, "red", dotSize);
+        drawPoint(wrist_l, "red", dotSize);
+        drawPoint(wrist_r, "red", dotSize);
+
+        // 停止中はカメラ・Pose・骨格表示を継続し、会の測定判定だけ停止する
+        if (isPaused) {
+            canvasCtx.restore();
+            return;
+        }
+        
+        if (state === "WAITING") {
+            releaseCounter = 0;
+            
+            if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
+                triggerCounter += 1;
+                if (triggerCounter >= 3) {
+                    state = "RECORDING";
+                    recordedX = [];
+                    recordedY = [];
+                    recordedTimes = [];
+                    lastAnalysisResult = null;
+                    hasReachedKaiCandidate = false;
+                    releaseCounter = 0;
+                    recordingStartTime = performance.now();
+                }
+            } else {
+                triggerCounter = 0;
+            }
+        }
+        
+        else if (state === "RECORDING") {
+            
+            // ★ リアルタイム移動平均（EMA）でポーズの細かな震えを抑制
+            let currentX = wrist_r.x;
+            let currentY = wrist_r.y;
+            if (recordedX.length > 0) {
+                const alpha = 0.4;
+                currentX = alpha * currentX + (1 - alpha) * recordedX[recordedX.length - 1];
+                currentY = alpha * currentY + (1 - alpha) * recordedY[recordedY.length - 1];
+            }
+        
+            recordedX.push(currentX);
+            recordedY.push(currentY);
+            recordedTimes.push(performance.now());
+            
+            if (recordedX.length > 30) {
+                let recent_x = recordedX.slice(-15);
+                let recent_x_range = Math.max(...recent_x) - Math.min(...recent_x);
+                
+                if (recent_x_range < (shoulder_width * 0.05)) {
+                    hasReachedKaiCandidate = true;
+                }
+                
+                if (hasReachedKaiCandidate) {
+                    let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_l.x) || 
+                                  (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_l.x);
+                    
+                    if (!inOrder) {
+                        releaseCounter++;
+                    } else {
+                        releaseCounter = 0;
+                    }
+                    
+                    if (releaseCounter >= 6) {
+                        state = "DONE";
+                        
+                        let endTime = performance.now();
+                        let totalSec = (endTime - recordingStartTime) / 1000.0;
+                        
+                        // ★ 最低記録時間チェック（全体の動きが3秒未満の誤作動は除外）
+                        if (totalSec < 3.0) {
+                            state = "WAITING";
+                            recordedX = []; recordedY = []; recordedTimes = [];
+                            triggerCounter = 0; releaseCounter = 0;
+                            return;
+                        }
+        
+                        // ★ 離れ瞬間の混入防止: releaseCounter(6) + 安全バッファ(3フレーム)をカット
+                        const SAFETY_BUFFER = 3;
+                        const cutCount = releaseCounter + SAFETY_BUFFER;
+                        
+                        if (recordedX.length > cutCount) {
+                            const cleanX = recordedX.slice(0, recordedX.length - cutCount);
+                            const cleanY = recordedY.slice(0, recordedY.length - cutCount);
+                            const cleanTimes = recordedTimes.slice(0, recordedTimes.length - cutCount);
+            
+                            let result = calculateKaiTimeHybrid(cleanX, cleanY, cleanTimes);
+                            
+                            // ★ 会の長さが1秒未満のデータはノイズとして除外
+                            if (result.kaiSeconds !== null && result.kaiSeconds >= 0) {
+                                const li = document.createElement('li');
+                                li.innerText = `${result.kaiSeconds.toFixed(2)} 秒`;
+                                recordList.prepend(li);
+        
+                                lastAnalysisResult = {
+                                    actualDaisanFrame: result.actualDaisanFrame,
+                                    kaiStartFrame: result.kaiStartFrame
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        else if (state === "DONE") {
+            if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
+                state = "WAITING";
+                triggerCounter = 0;
+                releaseCounter = 0;
+            }
+        }
+        
+        drawGraph(recordedX, lastAnalysisResult);
+            }
+            canvasCtx.restore();
+        });
+        
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+        await pose.send({image: videoElement});
+            }
+        });
+        camera.start();
+        
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            recordList.innerHTML = ''; 
+            state = "WAITING";
+            recordedX = [];
+            recordedY = [];
+            recordedTimes = [];
+            lastAnalysisResult = null;
+            triggerCounter = 0;
+            releaseCounter = 0;
+            drawGraph(recordedX, lastAnalysisResult); 
+        });
+    </script>
+</body>
+
+</html>
