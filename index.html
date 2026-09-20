@@ -2,7 +2,8 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>弓道 会の計測システム (ハイブリッド解析 Web版)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>弓道 会の計測システム</title>
     <!-- MediaPipeの読み込み -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -10,28 +11,92 @@
     <!-- math.js の読み込み -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; background-color: #222; color: white;}
-        canvas { border: 2px solid #fff; max-width: 100%; height: auto; }
-        #status-text { font-size: 24px; font-weight: bold; margin: 10px 0; color: #00ff00; }
-        button { font-size: 18px; padding: 10px 20px; margin: 10px; cursor: pointer; }
+        /* 全体の設定：白背景、黒文字 */
+        body { 
+            margin: 0; padding: 0; 
+            background-color: #ffffff; color: #000000; 
+            font-family: sans-serif; 
+            display: flex; width: 100vw; height: 100vh; 
+            overflow: hidden; 
+        }
+        
+        /* 左側の履歴リストエリア (画面の20%) */
+        #sidebar { 
+            width: 20%; 
+            background-color: #f8f9fa; 
+            border-right: 1px solid #ccc; 
+            padding: 10px; 
+            box-sizing: border-box; 
+            overflow-y: auto; 
+        }
+        #sidebar h3 { margin-top: 0; font-size: 1rem; text-align: center; border-bottom: 2px solid #333; padding-bottom: 5px; }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { padding: 8px 0; border-bottom: 1px solid #ddd; font-size: 0.9rem; font-weight: bold;}
+        
+        /* 右側のメインエリア (画面の80%) */
+        #main-area { 
+            width: 80%; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: flex-end; /* 右上に寄せる */
+            box-sizing: border-box; 
+        }
+        
+        /* 動画コンテナ (16:9比率を維持) */
+        #video-container { 
+            width: 100%; 
+            aspect-ratio: 16 / 9; 
+            background-color: #000; 
+            position: relative; 
+        }
+        
+        /* キャンバス（映像）の左右反転設定 */
+        canvas { 
+            width: 100%; height: 100%; 
+            object-fit: cover; 
+            transform: scaleX(-1); /* ここで映像を鏡像に反転！ */
+        }
+        
+        /* ステータスとボタンのエリア */
+        #controls { 
+            width: 100%; padding: 15px; 
+            box-sizing: border-box; 
+            display: flex; flex-direction: column; align-items: flex-end; 
+        }
+        #status-text { font-size: 1.2rem; font-weight: bold; margin-bottom: 15px; }
+        button { 
+            font-size: 1rem; padding: 12px 24px; cursor: pointer; 
+            background-color: #333; color: #fff; 
+            border: none; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        button:active { background-color: #555; transform: translateY(2px); box-shadow: none; }
     </style>
 </head>
 <body>
 
-    <h2>弓道 会の計測システム (Hybrid Analysis)</h2>
-    <div id="status-text">Status: WAITING (Raise hands to start)</div>
-    
-    <video id="input_video" style="display:none;" autoplay playsinline></video>
-    <canvas id="output_canvas" width="640" height="480"></canvas>
+    <!-- 左メニュー：記録リスト -->
+    <div id="sidebar">
+        <h3>記録</h3>
+        <ul id="record-list"></ul>
+    </div>
 
-    <button id="reset-btn">システムをリセット (Reset)</button>
+    <!-- 右メイン：カメラと情報 -->
+    <div id="main-area">
+        <div id="video-container">
+            <!-- カメラ解像度を16:9(1280x720)に指定 -->
+            <video id="input_video" style="display:none;" autoplay playsinline></video>
+            <canvas id="output_canvas" width="1280" height="720"></canvas>
+        </div>
+        <div id="controls">
+            <div id="status-text">Status: WAITING (両手を目の高さへ)</div>
+            <button id="reset-btn">次の行射へ (Reset)</button>
+        </div>
+    </div>
 
     <script>
         // ==========================================
-        // 解析用アルゴリズム関数 (math.js 使用)
+        // 解析アルゴリズム関数 (前回と同じ)
         // ==========================================
-
-        // 1. 移動平均 (Pythonの np.convolve(mode='valid') に相当)
         function movingAverage(data, windowSize) {
             let result = [];
             for (let i = 0; i <= data.length - windowSize; i++) {
@@ -44,26 +109,21 @@
             return result;
         }
 
-        // 2. 2次多項式フィッティング (Pythonの np.polyfit(x, y, 2) に相当)
         function polyfit2(x, y) {
             let X_mat = [];
             let Y_mat = [];
             for (let i = 0; i < x.length; i++) {
-                X_mat.push([x[i] * x[i], x[i], 1]); // [x^2, x, 1]
+                X_mat.push([x[i] * x[i], x[i], 1]);
                 Y_mat.push([y[i]]);
             }
-            
-            // 行列計算: B = (X^T * X)^-1 * X^T * Y
             let Xt = math.transpose(X_mat);
             let XtX = math.multiply(Xt, X_mat);
             let XtX_inv = math.inv(XtX);
             let XtY = math.multiply(Xt, Y_mat);
             let B = math.multiply(XtX_inv, XtY); 
-            
-            return [B[0][0], B[1][0], B[2][0]]; // [a, b, c]
+            return [B[0][0], B[1][0], B[2][0]];
         }
 
-        // 3. 2次関数の二乗誤差を計算
         function calcPolyError(x, y, coeffs) {
             const [a, b, c] = coeffs;
             let error = 0;
@@ -74,23 +134,18 @@
             return error;
         }
 
-        // 4. ハイブリッド型 解析メイン関数 (Pythonからの完全移植)
         function calculateKaiTimeHybrid(xData, yData, actualFps) {
             const windowSize = 5;
-            if (xData.length < windowSize * 2) {
-                return { kaiSeconds: null, error: "Data too short" };
-            }
+            if (xData.length < windowSize * 2) return { kaiSeconds: null, error: "Data too short" };
             
             const smoothedX = movingAverage(xData, windowSize);
             const smoothedY = movingAverage(yData, windowSize);
             const offset = Math.floor(windowSize / 2);
             
-            // 会の近似X座標を算出
             const kaiLen = Math.max(10, Math.min(30, Math.floor(smoothedX.length * 0.15)));
             const kaiSlice = smoothedX.slice(-kaiLen);
             const kaiApproxX = kaiSlice.reduce((sum, val) => sum + val, 0) / kaiSlice.length;
             
-            // 大三の推定
             const searchRange = Math.floor(smoothedX.length / 2);
             let maxDiff = -1;
             let daisanIdx = 0;
@@ -108,7 +163,6 @@
             let bestError = Infinity;
             let bestSplitIdx = 0;
             
-            // 会の開始点の探索（2次関数と水平線の誤差比較）
             for (let t = 5; t < analysisY.length - 5; t++) {
                 let xFirst = Array.from({length: t}, (_, i) => i);
                 let yFirst = analysisY.slice(0, t);
@@ -131,21 +185,20 @@
             const actualDaisanFrame = daisanIdx + offset;
             const kaiStartFrame = bestSplitIdx + actualDaisanFrame;
             const kaiLengthFrames = yData.length - kaiStartFrame;
-            
-            // フレーム数と実際のFPSから秒数を算出
             const kaiSeconds = kaiLengthFrames / actualFps;
             
             return { actualDaisanFrame, kaiStartFrame, kaiSeconds };
         }
 
         // ==========================================
-        // メイン処理（UI・カメラ・MediaPipe制御）
+        // メイン処理
         // ==========================================
 
         const videoElement = document.getElementById('input_video');
         const canvasElement = document.getElementById('output_canvas');
         const canvasCtx = canvasElement.getContext('2d');
         const statusText = document.getElementById('status-text');
+        const recordList = document.getElementById('record-list');
 
         let state = "WAITING"; 
         let triggerCounter = 0; 
@@ -153,8 +206,8 @@
         let recordedY = [];
         let frameIndex = 0;
         let hasReachedKaiCandidate = false; 
-        let kaiSecDisplay = null;
         let recordingStartTime = 0; 
+        let recordCount = 1;
 
         const pose = new Pose({locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
@@ -167,6 +220,14 @@
             minTrackingConfidence: 0.5
         });
 
+        // 座標に点を描画するヘルパー関数
+        function drawPoint(landmark, color, size) {
+            canvasCtx.beginPath();
+            canvasCtx.arc(landmark.x * canvasElement.width, landmark.y * canvasElement.height, size, 0, 2 * Math.PI);
+            canvasCtx.fillStyle = color;
+            canvasCtx.fill();
+        }
+
         pose.onResults((results) => {
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
@@ -175,19 +236,28 @@
             if (results.poseLandmarks) {
                 const landmarks = results.poseLandmarks;
                 
-                let wrist_r_x = landmarks[16].x;
-                let wrist_r_y = landmarks[16].y;
-                let nose_y = landmarks[0].y;
-                let shoulder_width = Math.abs(landmarks[11].x - landmarks[12].x);
+                let wrist_r = landmarks[16]; // 右手首
+                let wrist_l = landmarks[15]; // 左手首
+                let shoulder_r = landmarks[12]; // 右肩
+                let shoulder_l = landmarks[11]; // 左肩
+                
+                // 両目(2, 5)のY座標の平均をとって「目の高さ」とする
+                let eye_y = (landmarks[2].y + landmarks[5].y) / 2.0;
+                let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
 
-                canvasCtx.beginPath();
-                canvasCtx.arc(wrist_r_x * canvasElement.width, wrist_r_y * canvasElement.height, 8, 0, 2 * Math.PI);
-                canvasCtx.fillStyle = "red";
-                canvasCtx.fill();
+                // 要望の4箇所（両手首、両肩）に赤い点を描画
+                drawPoint(wrist_r, "red", 10);
+                drawPoint(wrist_l, "red", 10);
+                drawPoint(shoulder_r, "red", 10);
+                drawPoint(shoulder_l, "red", 10);
 
                 if (state === "WAITING") {
-                    statusText.innerText = "Status: WAITING (Raise hands to start)";
-                    if (wrist_r_y < nose_y) {
+                    statusText.innerText = "Status: WAITING (両手を目の高さへ)";
+                    statusText.style.color = "#000";
+                    
+                    // 「両方の手首」が「目の高さ」より上に上がったら打ち起こしと判定
+                    // (※Y座標は上が0、下が1なので、数値が小さい方が「上」です)
+                    if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
                         triggerCounter += 1;
                         if (triggerCounter >= 3) {
                             state = "RECORDING";
@@ -195,7 +265,6 @@
                             recordedY = [];
                             hasReachedKaiCandidate = false;
                             recordingStartTime = performance.now();
-                            console.log(`[${frameIndex}] 打ち起こし検知。`);
                         }
                     } else {
                         triggerCounter = 0;
@@ -203,9 +272,11 @@
                 }
                 
                 else if (state === "RECORDING") {
-                    statusText.innerText = `Status: RECORDING... (Frames: ${recordedX.length})`;
-                    recordedX.push(wrist_r_x);
-                    recordedY.push(wrist_r_y);
+                    statusText.innerText = `Status: RECORDING... (行射中)`;
+                    statusText.style.color = "blue";
+                    
+                    recordedX.push(wrist_r.x);
+                    recordedY.push(wrist_r.y);
                     
                     if (recordedX.length > 30) {
                         let recent_x = recordedX.slice(-15);
@@ -213,37 +284,35 @@
                         
                         if (recent_x_range < (shoulder_width * 0.05)) {
                             hasReachedKaiCandidate = true;
-                            statusText.innerText = "Status: KAI (Holding...)";
+                            statusText.innerText = "Status: KAI (会を検知中...)";
                         }
                         
                         if (hasReachedKaiCandidate) {
                             let diff_spark = Math.abs(recordedX[recordedX.length - 1] - recordedX[recordedX.length - 3]);
                             if (diff_spark > (shoulder_width * 0.15)) {
                                 state = "DONE";
-                                console.log(`[${frameIndex}] 離れ検知。解析中...`);
                                 
-                                // PC/スマホごとに変動する実際のFPSを計算
                                 let endTime = performance.now();
                                 let totalSec = (endTime - recordingStartTime) / 1000.0;
                                 let actualFps = recordedX.length / totalSec;
                                 
-                                // ★math.jsを用いた高度な解析処理の実行
                                 let result = calculateKaiTimeHybrid(recordedX, recordedY, actualFps);
                                 
                                 if (result.kaiSeconds !== null) {
-                                    kaiSecDisplay = result.kaiSeconds;
-                                    statusText.innerText = `SUCCESS! Kai: ${kaiSecDisplay.toFixed(2)} sec`;
+                                    statusText.innerText = `SUCCESS! 会: ${result.kaiSeconds.toFixed(2)} 秒`;
+                                    statusText.style.color = "green";
+                                    
+                                    // 左側のリストに結果を追加 (一番上に追加)
+                                    const li = document.createElement('li');
+                                    li.innerText = `${recordCount}射目: ${result.kaiSeconds.toFixed(2)} 秒`;
+                                    recordList.prepend(li);
+                                    recordCount++;
                                 } else {
                                     statusText.innerText = `Error: ${result.error}`;
+                                    statusText.style.color = "red";
                                 }
                             }
                         }
-                    }
-                }
-                
-                else if (state === "DONE") {
-                    if (kaiSecDisplay !== null) {
-                        statusText.innerText = `Result: ${kaiSecDisplay.toFixed(2)} sec (Press Reset)`;
                     }
                 }
             }
@@ -251,23 +320,26 @@
             frameIndex++;
         });
 
+        // カメラ解像度を 16:9 のHD画質に指定
         const camera = new Camera(videoElement, {
             onFrame: async () => {
                 await pose.send({image: videoElement});
             },
-            width: 640,
-            height: 480
+            width: 1280,
+            height: 720
         });
         camera.start();
 
+        // リセットボタン
         document.getElementById('reset-btn').addEventListener('click', () => {
-            state = "WAITING";
-            recordedX = [];
-            recordedY = [];
-            kaiSecDisplay = null;
-            triggerCounter = 0;
-            statusText.innerText = "Status: WAITING (Raise hands to start)";
-            console.log("リセットしました。");
+            if (state !== "WAITING") {
+                state = "WAITING";
+                recordedX = [];
+                recordedY = [];
+                triggerCounter = 0;
+                statusText.innerText = "Status: WAITING (両手を目の高さへ)";
+                statusText.style.color = "#000";
+            }
         });
     </script>
 </body>
