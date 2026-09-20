@@ -123,11 +123,11 @@
         function movingAverage(data, windowSize) {
             let result = [];
             for (let i = 0; i <= data.length - windowSize; i++) {
-        let sum = 0;
-        for (let j = 0; j < windowSize; j++) {
-            sum += data[i + j];
-        }
-        result.push(sum / windowSize);
+                let sum = 0;
+                for (let j = 0; j < windowSize; j++) {
+                    sum += data[i + j];
+                }
+                result.push(sum / windowSize);
             }
             return result;
         }
@@ -204,8 +204,8 @@
             const [a, b, c] = coeffs;
             let error = 0;
             for (let i = 0; i < x.length; i++) {
-        let pred = a * x[i] * x[i] + b * x[i] + c;
-        error += Math.pow(y[i] - pred, 2);
+                let pred = a * x[i] * x[i] + b * x[i] + c;
+                error += Math.pow(y[i] - pred, 2);
             }
             return error;
         }
@@ -250,24 +250,12 @@
                 return { kaiSeconds: null, error: "Not enough frames for analysis" };
             }
 
-            /*
-             * 区分モデル
-             *
-             * 第1区間: y = c1
-             * 第2区間: (tp, c1) と (tq, c2) を結ぶ直線
-             * 第3区間: y = c2
-             *
-             * p, q を全探索し、c1, c2 は各 p, q に対する
-             * 誤差二乗和最小の値を連立一次方程式から求める。
-             */
             let bestError = Infinity;
             let bestP = -1;
             let bestQ = -1;
             let bestC1 = 0;
             let bestC2 = 0;
 
-            // p, q に最低長などの境界条件を設けず、全ての分割を総当たり
-            // 各3区間が少なくとも1点を持つよう、1 <= p < q <= n-1 とする。
             for (let p = 1; p < n - 1; p++) {
                 for (let q = p + 1; q <= n - 1; q++) {
                     const tp = analysisTimes[p];
@@ -277,7 +265,6 @@
                         continue;
                     }
 
-                    // E = Σ(y_i - a_i*c1 - b_i*c2)^2
                     let A11 = 0;
                     let A12 = 0;
                     let A22 = 0;
@@ -366,7 +353,9 @@
 
             return {
                 actualDaisanFrame,
+                hikawakeFrame: daisanIdx + bestP + offset, // ★追加：総当たりの最初の点（引き分け）
                 kaiStartFrame,
+                hanareFrame: timesData.length - 1,         // ★追加：cleanXの最後（離れの3フレーム前）
                 kaiSeconds,
                 boundaryP: bestP,
                 boundaryQ: bestQ,
@@ -384,8 +373,8 @@
             const gCtx = gCanvas.getContext('2d');
             
             if (gCanvas.width !== gCanvas.clientWidth || gCanvas.height !== gCanvas.clientHeight) {
-        gCanvas.width = gCanvas.clientWidth;
-        gCanvas.height = gCanvas.clientHeight;
+                gCanvas.width = gCanvas.clientWidth;
+                gCanvas.height = gCanvas.clientHeight;
             }
             
             gCtx.clearRect(0, 0, gCanvas.width, gCanvas.height);
@@ -405,49 +394,55 @@
             gCtx.lineWidth = 2;
             
             for (let i = 0; i < data.length; i++) {
-        const x = padding + (i / (data.length - 1)) * width;
-        const y = padding + height - ((data[i] - minData) / range) * height;
-        if (i === 0) {
-            gCtx.moveTo(x, y);
-        } else {
-            gCtx.lineTo(x, y);
-        }
+                const x = padding + (i / (data.length - 1)) * width;
+                const y = padding + height - ((data[i] - minData) / range) * height;
+                if (i === 0) {
+                    gCtx.moveTo(x, y);
+                } else {
+                    gCtx.lineTo(x, y);
+                }
             }
             gCtx.stroke();
         
             if (analysisData) {
-        gCtx.font = "bold 14px sans-serif";
-        
-        const drawMarker = (frameIdx, label, color) => {
-            if (frameIdx >= 0 && frameIdx < data.length) {
-                const x = padding + (frameIdx / (data.length - 1)) * width;
-                const y = padding + height - ((data[frameIdx] - minData) / range) * height;
+                gCtx.font = "bold 14px sans-serif";
                 
-                gCtx.beginPath();
-                gCtx.setLineDash([5, 5]);
-                gCtx.strokeStyle = color;
-                gCtx.lineWidth = 1;
-                gCtx.moveTo(x, padding);
-                gCtx.lineTo(x, gCanvas.height - padding);
-                gCtx.stroke();
-                gCtx.setLineDash([]);
-        
-                gCtx.beginPath();
-                gCtx.arc(x, y, 5, 0, Math.PI * 2);
-                gCtx.fillStyle = color;
-                gCtx.fill();
-        
-                gCtx.fillText(label, x + 8, padding + 15);
-            }
-        };
-        
-        if (analysisData.actualDaisanFrame) {
-            drawMarker(analysisData.actualDaisanFrame, "大三", "#ff8800");
-        }
-        
-        if (analysisData.kaiStartFrame) {
-            drawMarker(analysisData.kaiStartFrame, "会", "red");
-        }
+                const drawMarker = (frameIdx, label, color) => {
+                    if (frameIdx >= 0 && frameIdx < data.length) {
+                        const x = padding + (frameIdx / (data.length - 1)) * width;
+                        const y = padding + height - ((data[frameIdx] - minData) / range) * height;
+                        
+                        gCtx.beginPath();
+                        gCtx.setLineDash([5, 5]);
+                        gCtx.strokeStyle = color;
+                        gCtx.lineWidth = 1;
+                        gCtx.moveTo(x, padding);
+                        gCtx.lineTo(x, gCanvas.height - padding);
+                        gCtx.stroke();
+                        gCtx.setLineDash([]);
+                
+                        gCtx.beginPath();
+                        gCtx.arc(x, y, 5, 0, Math.PI * 2);
+                        gCtx.fillStyle = color;
+                        gCtx.fill();
+                
+                        gCtx.fillText(label, x + 8, padding + 15);
+                    }
+                };
+                
+                // ★各地点のマーカーを描画
+                if (analysisData.actualDaisanFrame !== undefined) {
+                    drawMarker(analysisData.actualDaisanFrame, "大三", "#ff8800");
+                }
+                if (analysisData.hikawakeFrame !== undefined) {
+                    drawMarker(analysisData.hikawakeFrame, "引き分け", "#0088ff");
+                }
+                if (analysisData.kaiStartFrame !== undefined) {
+                    drawMarker(analysisData.kaiStartFrame, "会", "red");
+                }
+                if (analysisData.hanareFrame !== undefined) {
+                    drawMarker(analysisData.hanareFrame, "離れ", "#9900ff");
+                }
             }
         }
         
@@ -523,8 +518,8 @@
         
         pose.onResults((results) => {
             if (canvasElement.width !== results.image.width || canvasElement.height !== results.image.height) {
-        canvasElement.width = results.image.width;
-        canvasElement.height = results.image.height;
+                canvasElement.width = results.image.width;
+                canvasElement.height = results.image.height;
             }
         
             canvasCtx.save();
@@ -532,152 +527,155 @@
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
         
             if (results.poseLandmarks) {
-        const landmarks = results.poseLandmarks;
+                const landmarks = results.poseLandmarks;
         
-        let eye_l = landmarks[2];
-        let eye_r = landmarks[5];
-        let shoulder_l = landmarks[11];
-        let shoulder_r = landmarks[12];
-        let elbow_l = landmarks[13];
-        let elbow_r = landmarks[14];
-        let wrist_l = landmarks[15];
-        let wrist_r = landmarks[16];
+                let eye_l = landmarks[2];
+                let eye_r = landmarks[5];
+                let shoulder_l = landmarks[11];
+                let shoulder_r = landmarks[12];
+                let elbow_l = landmarks[13];
+                let elbow_r = landmarks[14];
+                let wrist_l = landmarks[15];
+                let wrist_r = landmarks[16];
         
-        let eye_y = (eye_l.y + eye_r.y) / 2.0;
-        let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
+                let eye_y = (eye_l.y + eye_r.y) / 2.0;
+                let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
         
-        const neonGreen = "#39ff14";
-        drawLine(shoulder_l, shoulder_r, neonGreen, 4); 
-        drawLine(shoulder_r, elbow_r, neonGreen, 4);
-        drawLine(elbow_r, wrist_r, neonGreen, 4);
-        drawLine(shoulder_l, elbow_l, neonGreen, 4);
-        drawLine(elbow_l, wrist_l, neonGreen, 4);
+                const neonGreen = "#39ff14";
+                drawLine(shoulder_l, shoulder_r, neonGreen, 4); 
+                drawLine(shoulder_r, elbow_r, neonGreen, 4);
+                drawLine(elbow_r, wrist_r, neonGreen, 4);
+                drawLine(shoulder_l, elbow_l, neonGreen, 4);
+                drawLine(elbow_l, wrist_l, neonGreen, 4);
         
-        const dotSize = 5;
-        drawPoint(shoulder_l, "red", dotSize);
-        drawPoint(shoulder_r, "red", dotSize);
-        drawPoint(elbow_l, "red", dotSize);
-        drawPoint(elbow_r, "red", dotSize);
-        drawPoint(wrist_l, "red", dotSize);
-        drawPoint(wrist_r, "red", dotSize);
+                const dotSize = 5;
+                drawPoint(shoulder_l, "red", dotSize);
+                drawPoint(shoulder_r, "red", dotSize);
+                drawPoint(elbow_l, "red", dotSize);
+                drawPoint(elbow_r, "red", dotSize);
+                drawPoint(wrist_l, "red", dotSize);
+                drawPoint(wrist_r, "red", dotSize);
 
-        // 停止中はカメラ・Pose・骨格表示を継続し、会の測定判定だけ停止する
-        if (isPaused) {
-            canvasCtx.restore();
-            return;
-        }
+                // 停止中はカメラ・Pose・骨格表示を継続し、会の測定判定だけ停止する
+                if (isPaused) {
+                    canvasCtx.restore();
+                    return;
+                }
         
-        if (state === "WAITING") {
-            releaseCounter = 0;
-            
-            if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
-                triggerCounter += 1;
-                if (triggerCounter >= 3) {
-                    state = "RECORDING";
-                    recordedX = [];
-                    recordedY = [];
-                    recordedTimes = [];
-                    lastAnalysisResult = null;
-                    hasReachedKaiCandidate = false;
+                if (state === "WAITING") {
                     releaseCounter = 0;
-                    recordingStartTime = performance.now();
-                }
-            } else {
-                triggerCounter = 0;
-            }
-        }
-        
-        else if (state === "RECORDING") {
-            
-            // ★ リアルタイム移動平均（EMA）でポーズの細かな震えを抑制
-            let currentX = wrist_r.x;
-            let currentY = wrist_r.y;
-            if (recordedX.length > 0) {
-                const alpha = 0.4;
-                currentX = alpha * currentX + (1 - alpha) * recordedX[recordedX.length - 1];
-                currentY = alpha * currentY + (1 - alpha) * recordedY[recordedY.length - 1];
-            }
-        
-            recordedX.push(currentX);
-            recordedY.push(currentY);
-            recordedTimes.push(performance.now());
-            
-            if (recordedX.length > 30) {
-                let recent_x = recordedX.slice(-15);
-                let recent_x_range = Math.max(...recent_x) - Math.min(...recent_x);
-                
-                if (recent_x_range < (shoulder_width * 0.05)) {
-                    hasReachedKaiCandidate = true;
-                }
-                
-                if (hasReachedKaiCandidate) {
-                    let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_l.x) || 
-                                  (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_l.x);
                     
-                    if (!inOrder) {
-                        releaseCounter++;
-                    } else {
-                        releaseCounter = 0;
-                    }
-                    
-                    if (releaseCounter >= 6) {
-                        state = "DONE";
-                        
-                        let endTime = performance.now();
-                        let totalSec = (endTime - recordingStartTime) / 1000.0;
-                        
-                        // ★ 最低記録時間チェック（全体の動きが3秒未満の誤作動は除外）
-                        if (totalSec < 3.0) {
-                            state = "WAITING";
-                            recordedX = []; recordedY = []; recordedTimes = [];
-                            triggerCounter = 0; releaseCounter = 0;
-                            return;
+                    if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
+                        triggerCounter += 1;
+                        if (triggerCounter >= 3) {
+                            state = "RECORDING";
+                            recordedX = [];
+                            recordedY = [];
+                            recordedTimes = [];
+                            lastAnalysisResult = null;
+                            hasReachedKaiCandidate = false;
+                            releaseCounter = 0;
+                            recordingStartTime = performance.now();
                         }
+                    } else {
+                        triggerCounter = 0;
+                    }
+                }
         
-                        // ★ 離れ瞬間の混入防止: releaseCounter(6) + 安全バッファ(3フレーム)をカット
-                        const SAFETY_BUFFER = 3;
-                        const cutCount = releaseCounter + SAFETY_BUFFER;
+                else if (state === "RECORDING") {
+                    
+                    // ★ リアルタイム移動平均（EMA）でポーズの細かな震えを抑制
+                    let currentX = wrist_r.x;
+                    let currentY = wrist_r.y;
+                    if (recordedX.length > 0) {
+                        const alpha = 0.4;
+                        currentX = alpha * currentX + (1 - alpha) * recordedX[recordedX.length - 1];
+                        currentY = alpha * currentY + (1 - alpha) * recordedY[recordedY.length - 1];
+                    }
+        
+                    recordedX.push(currentX);
+                    recordedY.push(currentY);
+                    recordedTimes.push(performance.now());
+                    
+                    if (recordedX.length > 30) {
+                        let recent_x = recordedX.slice(-15);
+                        let recent_x_range = Math.max(...recent_x) - Math.min(...recent_x);
                         
-                        if (recordedX.length > cutCount) {
-                            const cleanX = recordedX.slice(0, recordedX.length - cutCount);
-                            const cleanY = recordedY.slice(0, recordedY.length - cutCount);
-                            const cleanTimes = recordedTimes.slice(0, recordedTimes.length - cutCount);
-            
-                            let result = calculateKaiTimeHybrid(cleanX, cleanY, cleanTimes);
+                        if (recent_x_range < (shoulder_width * 0.05)) {
+                            hasReachedKaiCandidate = true;
+                        }
+                        
+                        if (hasReachedKaiCandidate) {
+                            let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_l.x) || 
+                                          (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_l.x);
                             
-                            // ★ 会の長さが1秒未満のデータはノイズとして除外
-                            if (result.kaiSeconds !== null && result.kaiSeconds >= 0) {
-                                const li = document.createElement('li');
-                                li.innerText = `${result.kaiSeconds.toFixed(2)} 秒`;
-                                recordList.prepend(li);
+                            if (!inOrder) {
+                                releaseCounter++;
+                            } else {
+                                releaseCounter = 0;
+                            }
+                            
+                            if (releaseCounter >= 6) {
+                                state = "DONE";
+                                
+                                let endTime = performance.now();
+                                let totalSec = (endTime - recordingStartTime) / 1000.0;
+                                
+                                // ★ 最低記録時間チェック（全体の動きが3秒未満の誤作動は除外）
+                                if (totalSec < 3.0) {
+                                    state = "WAITING";
+                                    recordedX = []; recordedY = []; recordedTimes = [];
+                                    triggerCounter = 0; releaseCounter = 0;
+                                    return;
+                                }
         
-                                lastAnalysisResult = {
-                                    actualDaisanFrame: result.actualDaisanFrame,
-                                    kaiStartFrame: result.kaiStartFrame
-                                };
+                                // ★ 離れ瞬間の混入防止: releaseCounter(6) + 安全バッファ(3フレーム)をカット
+                                const SAFETY_BUFFER = 3;
+                                const cutCount = releaseCounter + SAFETY_BUFFER;
+                                
+                                if (recordedX.length > cutCount) {
+                                    const cleanX = recordedX.slice(0, recordedX.length - cutCount);
+                                    const cleanY = recordedY.slice(0, recordedY.length - cutCount);
+                                    const cleanTimes = recordedTimes.slice(0, recordedTimes.length - cutCount);
+                
+                                    let result = calculateKaiTimeHybrid(cleanX, cleanY, cleanTimes);
+                                    
+                                    // ★ 会の長さが1秒未満のデータはノイズとして除外
+                                    if (result.kaiSeconds !== null && result.kaiSeconds >= 0) {
+                                        const li = document.createElement('li');
+                                        li.innerText = `${result.kaiSeconds.toFixed(2)} 秒`;
+                                        recordList.prepend(li);
+        
+                                        // ★取得したマーカー用のフレームをまとめて格納
+                                        lastAnalysisResult = {
+                                            actualDaisanFrame: result.actualDaisanFrame,
+                                            hikawakeFrame: result.hikawakeFrame, // 追加
+                                            kaiStartFrame: result.kaiStartFrame,
+                                            hanareFrame: result.hanareFrame      // 追加
+                                        };
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
         
-        else if (state === "DONE") {
-            if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
-                state = "WAITING";
-                triggerCounter = 0;
-                releaseCounter = 0;
-            }
-        }
+                else if (state === "DONE") {
+                    if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
+                        state = "WAITING";
+                        triggerCounter = 0;
+                        releaseCounter = 0;
+                    }
+                }
         
-        drawGraph(recordedX, lastAnalysisResult);
+                drawGraph(recordedX, lastAnalysisResult);
             }
             canvasCtx.restore();
         });
         
         const camera = new Camera(videoElement, {
             onFrame: async () => {
-        await pose.send({image: videoElement});
+                await pose.send({image: videoElement});
             }
         });
         camera.start();
