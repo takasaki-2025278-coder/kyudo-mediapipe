@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=2.0,user-scalable=yes">
+  <title>姿勢推定 テスト</title>
+
+  <!-- MediaPipeライブラリ -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+  <style>
+    body { margin: 0; padding: 20px; text-align: center; background-color: #222; color: white; font-family: sans-serif; }
+    #status { margin-bottom: 10px; font-weight: bold; color: #00FF00; }
+    .container { display: inline-block; position: relative; }
+    .can { transform: scaleX(-1); width: 100%; max-width: 640px; height: auto; background-color: #000; border: 2px solid #555; }
+  </style>
+</head>
+<body>
+  <h2>姿勢推定 テストサイト</h2>
+  <div id="status">カメラ起動中...（許可ダイアログが出たら許可してください）</div>
+  
+  <div class="container">
+    <video class="video" autoplay playsinline muted style="display:none;"></video>
+    <canvas class="can" width="640" height="480"></canvas>
+  </div>
+
+  <script>
+    window.addEventListener('load', function() {
+      const videoElement = document.querySelector('.video');
+      const canvasElement = document.querySelector('.can');
+      const canvasCtx = canvasElement.getContext('2d');
+      const statusText = document.getElementById('status');
+
+      const pose = new Pose({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+      }});
+
+      pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      pose.onResults(function(results) {
+        statusText.innerText = "認識中...";
+        statusText.style.color = "#00FF00";
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.poseLandmarks) {
+          drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+          drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+        } else {
+          statusText.innerText = "人が映っていません";
+          statusText.style.color = "#FFFF00";
+        }
+        canvasCtx.restore();
+      });
+
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await pose.send({image: videoElement});
+        },
+        width: 640,
+        height: 480
+      });
+      
+      camera.start().catch(function(err) {
+        statusText.innerText = "カメラの起動に失敗しました。";
+        statusText.style.color = "red";
+        console.error(err);
+      });
+    });
+  </script>
+</body>
+</html>
