@@ -434,7 +434,11 @@
                                 let totalSec = (endTime - recordingStartTime) / 1000.0;
                                 let actualFps = recordedX.length / totalSec;
                                 
-                                let result = calculateKaiTimeHybrid(recordedX, recordedY, actualFps);
+                                const cleanX = recordedX.slice(0, recordedX.length - releaseCounter);
+                                const cleanY = recordedY.slice(0, recordedY.length - releaseCounter);
+    
+                                 // 除去済みのデータ（cleanX, cleanY）で解析を実行
+                                let result = calculateKaiTimeHybrid(cleanX, cleanY, actualFps);
                                 
                                 if (result.kaiSeconds !== null) {
                                     const li = document.createElement('li');
