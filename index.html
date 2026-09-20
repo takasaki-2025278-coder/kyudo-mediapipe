@@ -111,7 +111,11 @@
         </div>
         <div id="controls">
             <div id="status-text"></div>
-            <button id="reset-btn">リセット</button>
+            <!-- ボタンをグループ化 -->
+            <div>
+                <button id="stop-btn">停止</button>
+                <button id="reset-btn">リセット</button>
+            </div>
         </div>
     </div>
     <script>
@@ -312,11 +316,27 @@
         let hasReachedKaiCandidate = false; 
         let recordingStartTime = 0; 
         let lastAnalysisResult = null;
+        let isPaused = false;
         
         const pose = new Pose({locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
         }});
-        
+        const stopBtn = document.getElementById('stop-btn');
+        stopBtn.addEventListener('click', () => {
+            isPaused = !isPaused; // 状態を反転
+            
+            if (isPaused) {
+                stopBtn.innerText = "再開";
+                
+                // 記録途中で停止した場合は状態をリセットする
+                state = "WAITING";
+                recordedX = []; recordedY = []; recordedTimes = [];
+                triggerCounter = 0; releaseCounter = 0;
+            } else {
+                stopBtn.innerText = "停止";
+                statusText.innerText = "";
+            }
+        });
         pose.setOptions({
             modelComplexity: 1,
             smoothLandmarks: true,
