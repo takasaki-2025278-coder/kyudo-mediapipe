@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>弓道 会の計測システム</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
     <style>
@@ -78,16 +77,18 @@
             border-radius: 4px;
         }
         
-        #controls { 
+        #controls {
             flex: 1;
             min-height: 60px;
-            width: 100%; padding: 10px 25px; 
-            box-sizing: border-box; 
-            display: flex; justify-content: space-between; align-items: center; 
+            width: 100%;
+            padding: 10px 25px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
             background-color: #fff;
             border-top: 1px solid #ddd;
         }
-        #status-text { font-size: 1.5rem; font-weight: bold; color: blue; }
         button { 
             font-size: 1.2rem; padding: 10px 30px; cursor: pointer; 
             background-color: #333; color: #fff; 
@@ -110,8 +111,6 @@
             <canvas id="graph_canvas"></canvas>
         </div>
         <div id="controls">
-            <div id="status-text"></div>
-            <!-- ボタンをグループ化 -->
             <div>
                 <button id="stop-btn">停止</button>
                 <button id="reset-btn">リセット</button>
@@ -120,10 +119,7 @@
     </div>
     <script>
         // ==========================================
-        // 解析アルゴリズム関数
-        // ==========================================
-        // ==========================================
-        // 解析アルゴリズム関数 (タイムスタンプ対応版)
+        // 解析アルゴリズム関数（タイムスタンプ対応版）
         // ==========================================
         function movingAverage(data, windowSize) {
             let result = [];
@@ -303,7 +299,6 @@
         const videoElement = document.getElementById('input_video');
         const canvasElement = document.getElementById('output_canvas');
         const canvasCtx = canvasElement.getContext('2d');
-        const statusText = document.getElementById('status-text');
         const recordList = document.getElementById('record-list');
         
         let state = "WAITING"; 
@@ -312,7 +307,6 @@
         let recordedX = [];
         let recordedY = [];
         let recordedTimes = []; // ★ タイムスタンプ配列
-        let frameIndex = 0;
         let hasReachedKaiCandidate = false; 
         let recordingStartTime = 0; 
         let lastAnalysisResult = null;
@@ -323,20 +317,27 @@
         }});
         const stopBtn = document.getElementById('stop-btn');
         stopBtn.addEventListener('click', () => {
-            isPaused = !isPaused; // 状態を反転
-            
+            isPaused = !isPaused;
+
             if (isPaused) {
-                stopBtn.innerText = "再開";
-                
-                // 記録途中で停止した場合は状態をリセットする
+                // 記録途中で停止した場合は、その計測を破棄して待機状態へ戻す
                 state = "WAITING";
-                recordedX = []; recordedY = []; recordedTimes = [];
-                triggerCounter = 0; releaseCounter = 0;
+                recordedX = [];
+                recordedY = [];
+                recordedTimes = [];
+                lastAnalysisResult = null;
+                triggerCounter = 0;
+                releaseCounter = 0;
+                drawGraph(recordedX, lastAnalysisResult);
+
+                stopBtn.innerText = "再開";
+                camera.stop();
             } else {
                 stopBtn.innerText = "停止";
-                statusText.innerText = "";
+                camera.start();
             }
         });
+
         pose.setOptions({
             modelComplexity: 1,
             smoothLandmarks: true,
@@ -401,7 +402,6 @@
         drawPoint(wrist_r, "red", dotSize);
         
         if (state === "WAITING") {
-            statusText.innerText = "";
             releaseCounter = 0;
             
             if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
@@ -422,7 +422,6 @@
         }
         
         else if (state === "RECORDING") {
-            statusText.innerText = "記録中";
             
             // ★ リアルタイム移動平均（EMA）でポーズの細かな震えを抑制
             let currentX = wrist_r.x;
@@ -457,7 +456,6 @@
                     
                     if (releaseCounter >= 6) {
                         state = "DONE";
-                        statusText.innerText = ""; 
                         
                         let endTime = performance.now();
                         let totalSec = (endTime - recordingStartTime) / 1000.0;
@@ -509,7 +507,6 @@
         drawGraph(recordedX, lastAnalysisResult);
             }
             canvasCtx.restore();
-            frameIndex++;
         });
         
         const camera = new Camera(videoElement, {
@@ -528,7 +525,6 @@
             lastAnalysisResult = null;
             triggerCounter = 0;
             releaseCounter = 0;
-            statusText.innerText = "";
             drawGraph(recordedX, lastAnalysisResult); 
         });
     </script>
