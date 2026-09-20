@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -67,7 +68,7 @@
             display: flex;
             flex-direction: column;
         }
-
+        
         #graph_canvas {
             width: 100%;
             flex: 1;
@@ -76,7 +77,7 @@
             border: 1px solid #ccc;
             border-radius: 4px;
         }
-
+        
         #controls { 
             flex: 1;
             min-height: 60px;
@@ -95,50 +96,49 @@
         button:active { background-color: #555; transform: translateY(2px); box-shadow: none; }
     </style>
 </head>
-<body>
 
+<body>
     <div id="sidebar">
         <ul id="record-list"></ul>
     </div>
-
     <div id="main-area">
         <div id="video-container">
             <video id="input_video" style="display:none;" autoplay playsinline></video>
             <canvas id="output_canvas"></canvas>
         </div>
-        
         <div id="graph-container">
             <canvas id="graph_canvas"></canvas>
         </div>
-
         <div id="controls">
             <div id="status-text"></div>
             <button id="reset-btn">リセット</button>
         </div>
     </div>
-
     <script>
         // ==========================================
         // 解析アルゴリズム関数
         // ==========================================
+        // ==========================================
+        // 解析アルゴリズム関数 (タイムスタンプ対応版)
+        // ==========================================
         function movingAverage(data, windowSize) {
             let result = [];
             for (let i = 0; i <= data.length - windowSize; i++) {
-                let sum = 0;
-                for (let j = 0; j < windowSize; j++) {
-                    sum += data[i + j];
-                }
-                result.push(sum / windowSize);
+        let sum = 0;
+        for (let j = 0; j < windowSize; j++) {
+            sum += data[i + j];
+        }
+        result.push(sum / windowSize);
             }
             return result;
         }
-
+        
         function polyfit2(x, y) {
             let X_mat = [];
             let Y_mat = [];
             for (let i = 0; i < x.length; i++) {
-                X_mat.push([x[i] * x[i], x[i], 1]);
-                Y_mat.push([y[i]]);
+        X_mat.push([x[i] * x[i], x[i], 1]);
+        Y_mat.push([y[i]]);
             }
             let Xt = math.transpose(X_mat);
             let XtX = math.multiply(Xt, X_mat);
@@ -147,18 +147,18 @@
             let B = math.multiply(XtX_inv, XtY); 
             return [B[0][0], B[1][0], B[2][0]];
         }
-
+        
         function calcPolyError(x, y, coeffs) {
             const [a, b, c] = coeffs;
             let error = 0;
             for (let i = 0; i < x.length; i++) {
-                let pred = a * x[i] * x[i] + b * x[i] + c;
-                error += Math.pow(y[i] - pred, 2);
+        let pred = a * x[i] * x[i] + b * x[i] + c;
+        error += Math.pow(y[i] - pred, 2);
             }
             return error;
         }
-
-        function calculateKaiTimeHybrid(xData, yData, actualFps) {
+        
+        function calculateKaiTimeHybrid(xData, yData, timesData) {
             const windowSize = 5;
             if (xData.length < windowSize * 2) return { kaiSeconds: null, error: "Data too short" };
             
@@ -174,55 +174,60 @@
             let maxDiff = -1;
             let daisanIdx = 0;
             for (let i = 0; i < searchRange; i++) {
-                let diff = Math.abs(smoothedX[i] - kaiApproxX);
-                if (diff > maxDiff) {
-                    maxDiff = diff;
-                    daisanIdx = i;
-                }
+        let diff = Math.abs(smoothedX[i] - kaiApproxX);
+        if (diff > maxDiff) {
+            maxDiff = diff;
+            daisanIdx = i;
+        }
             }
             
             const analysisY = smoothedY.slice(daisanIdx);
             if (analysisY.length <= 10) return { kaiSeconds: null, error: "Not enough frames for analysis" };
-
+        
             let bestError = Infinity;
             let bestSplitIdx = 0;
             
             for (let t = 5; t < analysisY.length - 5; t++) {
-                let xFirst = Array.from({length: t}, (_, i) => i);
-                let yFirst = analysisY.slice(0, t);
-                let coeffs = polyfit2(xFirst, yFirst);
-                let errorFirst = calcPolyError(xFirst, yFirst, coeffs);
-                
-                let ySecond = analysisY.slice(t);
-                let MathSum = ySecond.reduce((sum, val) => sum + val, 0);
-                let meanVal = MathSum / ySecond.length;
-                let errorSecond = ySecond.reduce((sum, val) => sum + Math.pow(val - meanVal, 2), 0);
-                
-                let totalError = errorFirst + errorSecond;
-                if (totalError < bestError) {
-                    bestError = totalError;
-                    bestSplitIdx = t;
-                }
+        let xFirst = Array.from({length: t}, (_, i) => i);
+        let yFirst = analysisY.slice(0, t);
+        let coeffs = polyfit2(xFirst, yFirst);
+        let errorFirst = calcPolyError(xFirst, yFirst, coeffs);
+        
+        let ySecond = analysisY.slice(t);
+        let MathSum = ySecond.reduce((sum, val) => sum + val, 0);
+        let meanVal = MathSum / ySecond.length;
+        let errorSecond = ySecond.reduce((sum, val) => sum + Math.pow(val - meanVal, 2), 0);
+        
+        let totalError = errorFirst + errorSecond;
+        if (totalError < bestError) {
+            bestError = totalError;
+            bestSplitIdx = t;
+        }
             }
             
             const actualDaisanFrame = daisanIdx + offset;
             const kaiStartFrame = bestSplitIdx + actualDaisanFrame;
-            const kaiLengthFrames = yData.length - kaiStartFrame;
-            const kaiSeconds = kaiLengthFrames / actualFps;
+            
+            if (kaiStartFrame >= timesData.length) return { kaiSeconds: null, error: "Invalid frame index" };
+        
+            // ★ タイムスタンプによるミリ秒単位の正確な計算
+            const kaiStartTimestamp = timesData[kaiStartFrame];
+            const kaiEndTimestamp = timesData[timesData.length - 1]; // 離れ直前のフレーム時刻
+            const kaiSeconds = (kaiEndTimestamp - kaiStartTimestamp) / 1000.0;
             
             return { actualDaisanFrame, kaiStartFrame, kaiSeconds };
         }
-
+        
         // ==========================================
-        // グラフ描画関数 (プロット機能追加)
+        // グラフ描画関数
         // ==========================================
         function drawGraph(data, analysisData = null) {
             const gCanvas = document.getElementById('graph_canvas');
             const gCtx = gCanvas.getContext('2d');
             
             if (gCanvas.width !== gCanvas.clientWidth || gCanvas.height !== gCanvas.clientHeight) {
-                gCanvas.width = gCanvas.clientWidth;
-                gCanvas.height = gCanvas.clientHeight;
+        gCanvas.width = gCanvas.clientWidth;
+        gCanvas.height = gCanvas.clientHeight;
             }
             
             gCtx.clearRect(0, 0, gCanvas.width, gCanvas.height);
@@ -237,64 +242,57 @@
             const maxData = Math.max(...data);
             const range = (maxData - minData) === 0 ? 1 : (maxData - minData);
             
-            // 折れ線の描画
             gCtx.beginPath();
             gCtx.strokeStyle = "#007bff";
             gCtx.lineWidth = 2;
             
             for (let i = 0; i < data.length; i++) {
-                const x = padding + (i / (data.length - 1)) * width;
-                const y = padding + height - ((data[i] - minData) / range) * height;
-                if (i === 0) {
-                    gCtx.moveTo(x, y);
-                } else {
-                    gCtx.lineTo(x, y);
-                }
+        const x = padding + (i / (data.length - 1)) * width;
+        const y = padding + height - ((data[i] - minData) / range) * height;
+        if (i === 0) {
+            gCtx.moveTo(x, y);
+        } else {
+            gCtx.lineTo(x, y);
+        }
             }
             gCtx.stroke();
-
-            // 会と引き分け開始のプロット
+        
             if (analysisData) {
-                gCtx.font = "bold 14px sans-serif";
+        gCtx.font = "bold 14px sans-serif";
+        
+        const drawMarker = (frameIdx, label, color) => {
+            if (frameIdx >= 0 && frameIdx < data.length) {
+                const x = padding + (frameIdx / (data.length - 1)) * width;
+                const y = padding + height - ((data[frameIdx] - minData) / range) * height;
                 
-                const drawMarker = (frameIdx, label, color) => {
-                    if (frameIdx >= 0 && frameIdx < data.length) {
-                        const x = padding + (frameIdx / (data.length - 1)) * width;
-                        const y = padding + height - ((data[frameIdx] - minData) / range) * height;
-                        
-                        // 縦線（点線）
-                        gCtx.beginPath();
-                        gCtx.setLineDash([5, 5]);
-                        gCtx.strokeStyle = color;
-                        gCtx.lineWidth = 1;
-                        gCtx.moveTo(x, padding);
-                        gCtx.lineTo(x, gCanvas.height - padding);
-                        gCtx.stroke();
-                        gCtx.setLineDash([]); // 点線リセット
-
-                        // ポイント
-                        gCtx.beginPath();
-                        gCtx.arc(x, y, 5, 0, Math.PI * 2);
-                        gCtx.fillStyle = color;
-                        gCtx.fill();
-
-                        // テキストラベル
-                        gCtx.fillText(label, x + 8, padding + 15);
-                    }
-                };
-
-                // 引き分け（大三）のプロット（オレンジ）
-                if (analysisData.actualDaisanFrame) {
-                    drawMarker(analysisData.actualDaisanFrame, "大三", "#ff8800");
-                }
-                
-                // 会のプロット（赤）
-                if (analysisData.kaiStartFrame) {
-                    drawMarker(analysisData.kaiStartFrame, "会", "red");
-                }
+                gCtx.beginPath();
+                gCtx.setLineDash([5, 5]);
+                gCtx.strokeStyle = color;
+                gCtx.lineWidth = 1;
+                gCtx.moveTo(x, padding);
+                gCtx.lineTo(x, gCanvas.height - padding);
+                gCtx.stroke();
+                gCtx.setLineDash([]);
+        
+                gCtx.beginPath();
+                gCtx.arc(x, y, 5, 0, Math.PI * 2);
+                gCtx.fillStyle = color;
+                gCtx.fill();
+        
+                gCtx.fillText(label, x + 8, padding + 15);
+            }
+        };
+        
+        if (analysisData.actualDaisanFrame) {
+            drawMarker(analysisData.actualDaisanFrame, "大三", "#ff8800");
+        }
+        
+        if (analysisData.kaiStartFrame) {
+            drawMarker(analysisData.kaiStartFrame, "会", "red");
+        }
             }
         }
-
+        
         // ==========================================
         // メイン処理
         // ==========================================
@@ -303,17 +301,18 @@
         const canvasCtx = canvasElement.getContext('2d');
         const statusText = document.getElementById('status-text');
         const recordList = document.getElementById('record-list');
-
+        
         let state = "WAITING"; 
         let triggerCounter = 0; 
         let releaseCounter = 0; 
         let recordedX = [];
         let recordedY = [];
+        let recordedTimes = []; // ★ タイムスタンプ配列
         let frameIndex = 0;
         let hasReachedKaiCandidate = false; 
         let recordingStartTime = 0; 
-        let lastAnalysisResult = null; // 解析結果を保持する変数
-
+        let lastAnalysisResult = null;
+        
         const pose = new Pose({locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
         }});
@@ -324,14 +323,14 @@
             minDetectionConfidence: 0.5,
             minTrackingConfidence: 0.5
         });
-
+        
         function drawPoint(landmark, color, size) {
             canvasCtx.beginPath();
             canvasCtx.arc(landmark.x * canvasElement.width, landmark.y * canvasElement.height, size, 0, 2 * Math.PI);
             canvasCtx.fillStyle = color;
             canvasCtx.fill();
         }
-
+        
         function drawLine(p1, p2, color, width) {
             canvasCtx.beginPath();
             canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
@@ -340,150 +339,172 @@
             canvasCtx.lineWidth = width;
             canvasCtx.stroke();
         }
-
+        
         pose.onResults((results) => {
             if (canvasElement.width !== results.image.width || canvasElement.height !== results.image.height) {
-                canvasElement.width = results.image.width;
-                canvasElement.height = results.image.height;
+        canvasElement.width = results.image.width;
+        canvasElement.height = results.image.height;
             }
-
+        
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
+        
             if (results.poseLandmarks) {
-                const landmarks = results.poseLandmarks;
-                
-                let eye_l = landmarks[2];
-                let eye_r = landmarks[5];
-                let shoulder_l = landmarks[11];
-                let shoulder_r = landmarks[12];
-                let elbow_l = landmarks[13];
-                let elbow_r = landmarks[14];
-                let wrist_l = landmarks[15];
-                let wrist_r = landmarks[16];
-                
-                let eye_y = (eye_l.y + eye_r.y) / 2.0;
-                let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
-
-                const neonGreen = "#39ff14";
-                drawLine(shoulder_l, shoulder_r, neonGreen, 4); 
-                drawLine(shoulder_r, elbow_r, neonGreen, 4);
-                drawLine(elbow_r, wrist_r, neonGreen, 4);
-                drawLine(shoulder_l, elbow_l, neonGreen, 4);
-                drawLine(elbow_l, wrist_l, neonGreen, 4);
-
-                const dotSize = 5;
-                drawPoint(shoulder_l, "red", dotSize);
-                drawPoint(shoulder_r, "red", dotSize);
-                drawPoint(elbow_l, "red", dotSize);
-                drawPoint(elbow_r, "red", dotSize);
-                drawPoint(wrist_l, "red", dotSize);
-                drawPoint(wrist_r, "red", dotSize);
-
-                if (state === "WAITING") {
-                    statusText.innerText = "";
+        const landmarks = results.poseLandmarks;
+        
+        let eye_l = landmarks[2];
+        let eye_r = landmarks[5];
+        let shoulder_l = landmarks[11];
+        let shoulder_r = landmarks[12];
+        let elbow_l = landmarks[13];
+        let elbow_r = landmarks[14];
+        let wrist_l = landmarks[15];
+        let wrist_r = landmarks[16];
+        
+        let eye_y = (eye_l.y + eye_r.y) / 2.0;
+        let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
+        
+        const neonGreen = "#39ff14";
+        drawLine(shoulder_l, shoulder_r, neonGreen, 4); 
+        drawLine(shoulder_r, elbow_r, neonGreen, 4);
+        drawLine(elbow_r, wrist_r, neonGreen, 4);
+        drawLine(shoulder_l, elbow_l, neonGreen, 4);
+        drawLine(elbow_l, wrist_l, neonGreen, 4);
+        
+        const dotSize = 5;
+        drawPoint(shoulder_l, "red", dotSize);
+        drawPoint(shoulder_r, "red", dotSize);
+        drawPoint(elbow_l, "red", dotSize);
+        drawPoint(elbow_r, "red", dotSize);
+        drawPoint(wrist_l, "red", dotSize);
+        drawPoint(wrist_r, "red", dotSize);
+        
+        if (state === "WAITING") {
+            statusText.innerText = "";
+            releaseCounter = 0;
+            
+            if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
+                triggerCounter += 1;
+                if (triggerCounter >= 3) {
+                    state = "RECORDING";
+                    recordedX = [];
+                    recordedY = [];
+                    recordedTimes = [];
+                    lastAnalysisResult = null;
+                    hasReachedKaiCandidate = false;
                     releaseCounter = 0;
+                    recordingStartTime = performance.now();
+                }
+            } else {
+                triggerCounter = 0;
+            }
+        }
+        
+        else if (state === "RECORDING") {
+            statusText.innerText = "記録中";
+            
+            // ★ リアルタイム移動平均（EMA）でポーズの細かな震えを抑制
+            let currentX = wrist_r.x;
+            let currentY = wrist_r.y;
+            if (recordedX.length > 0) {
+                const alpha = 0.4;
+                currentX = alpha * currentX + (1 - alpha) * recordedX[recordedX.length - 1];
+                currentY = alpha * currentY + (1 - alpha) * recordedY[recordedY.length - 1];
+            }
+        
+            recordedX.push(currentX);
+            recordedY.push(currentY);
+            recordedTimes.push(performance.now());
+            
+            if (recordedX.length > 30) {
+                let recent_x = recordedX.slice(-15);
+                let recent_x_range = Math.max(...recent_x) - Math.min(...recent_x);
+                
+                if (recent_x_range < (shoulder_width * 0.05)) {
+                    hasReachedKaiCandidate = true;
+                }
+                
+                if (hasReachedKaiCandidate) {
+                    let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_l.x) || 
+                                  (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_l.x);
                     
-                    if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
-                        triggerCounter += 1;
-                        if (triggerCounter >= 3) {
-                            // ★ 新しい測定が始まるタイミングでデータをリセット
-                            state = "RECORDING";
-                            recordedX = [];
-                            recordedY = [];
-                            lastAnalysisResult = null;
-                            hasReachedKaiCandidate = false;
-                            releaseCounter = 0;
-                            recordingStartTime = performance.now();
-                        }
+                    if (!inOrder) {
+                        releaseCounter++;
                     } else {
-                        triggerCounter = 0;
-                    }
-                }
-                
-                else if (state === "RECORDING") {
-                    statusText.innerText = "記録中";
-                    
-                    recordedX.push(wrist_r.x);
-                    recordedY.push(wrist_r.y);
-                    
-                    if (recordedX.length > 30) {
-                        let recent_x = recordedX.slice(-15);
-                        let recent_x_range = Math.max(...recent_x) - Math.min(...recent_x);
-                        
-                        if (recent_x_range < (shoulder_width * 0.05)) {
-                            hasReachedKaiCandidate = true;
-                        }
-                        
-                        if (hasReachedKaiCandidate) {
-                            let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_l.x) || 
-                                          (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_l.x);
-                            
-                            if (!inOrder) {
-                                releaseCounter++;
-                            } else {
-                                releaseCounter = 0;
-                            }
-                            
-                            if (releaseCounter >= 6) {
-                                state = "DONE";
-                                statusText.innerText = ""; 
-                                
-                                let endTime = performance.now();
-                                let totalSec = (endTime - recordingStartTime) / 1000.0;
-                                let actualFps = recordedX.length / totalSec;
-                                
-                                const cleanX = recordedX.slice(0, recordedX.length - releaseCounter);
-                                const cleanY = recordedY.slice(0, recordedY.length - releaseCounter);
-    
-                                 // 除去済みのデータ（cleanX, cleanY）で解析を実行
-                                let result = calculateKaiTimeHybrid(cleanX, cleanY, actualFps);
-                                
-                                if (result.kaiSeconds !== null) {
-                                    const li = document.createElement('li');
-                                    li.innerText = `${result.kaiSeconds.toFixed(2)} 秒`;
-                                    recordList.prepend(li);
-
-                                    // ★ 解析結果を保存してグラフプロットに使用
-                                    lastAnalysisResult = {
-                                        actualDaisanFrame: result.actualDaisanFrame,
-                                        kaiStartFrame: result.kaiStartFrame
-                                    };
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                else if (state === "DONE") {
-                    if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
-                        // ★ グラフとデータは消さずに状態だけ戻す
-                        state = "WAITING";
-                        triggerCounter = 0;
                         releaseCounter = 0;
                     }
+                    
+                    if (releaseCounter >= 6) {
+                        state = "DONE";
+                        statusText.innerText = ""; 
+                        
+                        let endTime = performance.now();
+                        let totalSec = (endTime - recordingStartTime) / 1000.0;
+                        
+                        // ★ 最低記録時間チェック（全体の動きが3秒未満の誤作動は除外）
+                        if (totalSec < 3.0) {
+                            state = "WAITING";
+                            recordedX = []; recordedY = []; recordedTimes = [];
+                            triggerCounter = 0; releaseCounter = 0;
+                            return;
+                        }
+        
+                        // ★ 離れ瞬間の混入防止: releaseCounter(6) + 安全バッファ(3フレーム)をカット
+                        const SAFETY_BUFFER = 3;
+                        const cutCount = releaseCounter + SAFETY_BUFFER;
+                        
+                        if (recordedX.length > cutCount) {
+                            const cleanX = recordedX.slice(0, recordedX.length - cutCount);
+                            const cleanY = recordedY.slice(0, recordedY.length - cutCount);
+                            const cleanTimes = recordedTimes.slice(0, recordedTimes.length - cutCount);
+            
+                            let result = calculateKaiTimeHybrid(cleanX, cleanY, cleanTimes);
+                            
+                            // ★ 会の長さが1秒未満のデータはノイズとして除外
+                            if (result.kaiSeconds !== null && result.kaiSeconds >= 0) {
+                                const li = document.createElement('li');
+                                li.innerText = `${result.kaiSeconds.toFixed(2)} 秒`;
+                                recordList.prepend(li);
+        
+                                lastAnalysisResult = {
+                                    actualDaisanFrame: result.actualDaisanFrame,
+                                    kaiStartFrame: result.kaiStartFrame
+                                };
+                            }
+                        }
+                    }
                 }
-
-                // グラフを描画（プロット用の解析データも渡す）
-                drawGraph(recordedX, lastAnalysisResult);
+            }
+        }
+        
+        else if (state === "DONE") {
+            if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
+                state = "WAITING";
+                triggerCounter = 0;
+                releaseCounter = 0;
+            }
+        }
+        
+        drawGraph(recordedX, lastAnalysisResult);
             }
             canvasCtx.restore();
             frameIndex++;
         });
-
+        
         const camera = new Camera(videoElement, {
             onFrame: async () => {
-                await pose.send({image: videoElement});
+        await pose.send({image: videoElement});
             }
         });
         camera.start();
-
+        
         document.getElementById('reset-btn').addEventListener('click', () => {
             recordList.innerHTML = ''; 
             state = "WAITING";
             recordedX = [];
             recordedY = [];
+            recordedTimes = [];
             lastAnalysisResult = null;
             triggerCounter = 0;
             releaseCounter = 0;
@@ -492,4 +513,5 @@
         });
     </script>
 </body>
+
 </html>
