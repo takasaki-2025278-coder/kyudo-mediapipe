@@ -36,26 +36,47 @@
         }
         
         #video-container { 
-            flex: 1; 
+            flex: 6; /* 画面の上部6割をカメラ映像に */
             width: 100%; 
             background-color: #ffffff; 
             display: flex; 
             justify-content: center; 
             align-items: center;
+            overflow: hidden;
+            position: relative;
         }
         
-        canvas { 
+        #output_canvas { 
             max-width: 100%; 
             max-height: 100%; 
             object-fit: contain; 
             transform: scaleX(-1); 
         }
         
+        #graph-container {
+            flex: 3; /* 画面の3割をグラフ領域に */
+            width: 100%;
+            padding: 10px 20px;
+            box-sizing: border-box;
+            background-color: #f9f9f9;
+            border-top: 1px solid #ddd;
+        }
+
+        #graph_canvas {
+            width: 100%;
+            height: 100%;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
         #controls { 
-            width: 100%; padding: 15px 25px; 
+            flex: 1;
+            width: 100%; padding: 10px 25px; 
             box-sizing: border-box; 
             display: flex; justify-content: space-between; align-items: center; 
             background-color: #fff;
+            border-top: 1px solid #ddd;
         }
         #status-text { font-size: 1.5rem; font-weight: bold; color: blue; }
         button { 
@@ -77,6 +98,12 @@
             <video id="input_video" style="display:none;" autoplay playsinline></video>
             <canvas id="output_canvas"></canvas>
         </div>
+        
+        <div id="graph-container">
+            <!-- グラフ描画用キャンバス -->
+            <canvas id="graph_canvas"></canvas>
+        </div>
+
         <div id="controls">
             <div id="status-text"></div>
             <button id="reset-btn">リセット</button>
@@ -180,6 +207,47 @@
         }
 
         // ==========================================
+        // グラフ描画関数
+        // ==========================================
+        function drawGraph(data) {
+            const gCanvas = document.getElementById('graph_canvas');
+            const gCtx = gCanvas.getContext('2d');
+            
+            // Canvasの論理サイズをCSSの表示サイズに合わせる
+            if (gCanvas.width !== gCanvas.clientWidth || gCanvas.height !== gCanvas.clientHeight) {
+                gCanvas.width = gCanvas.clientWidth;
+                gCanvas.height = gCanvas.clientHeight;
+            }
+            
+            gCtx.clearRect(0, 0, gCanvas.width, gCanvas.height);
+            
+            if (data.length < 2) return;
+            
+            const padding = 15;
+            const width = gCanvas.width - padding * 2;
+            const height = gCanvas.height - padding * 2;
+            
+            const minData = Math.min(...data);
+            const maxData = Math.max(...data);
+            const range = (maxData - minData) === 0 ? 1 : (maxData - minData);
+            
+            gCtx.beginPath();
+            gCtx.strokeStyle = "#007bff";
+            gCtx.lineWidth = 2;
+            
+            for (let i = 0; i < data.length; i++) {
+                const x = padding + (i / (data.length - 1)) * width;
+                const y = padding + height - ((data[i] - minData) / range) * height;
+                if (i === 0) {
+                    gCtx.moveTo(x, y);
+                } else {
+                    gCtx.lineTo(x, y);
+                }
+            }
+            gCtx.stroke();
+        }
+
+        // ==========================================
         // メイン処理
         // ==========================================
         const videoElement = document.getElementById('input_video');
@@ -190,6 +258,7 @@
 
         let state = "WAITING"; 
         let triggerCounter = 0; 
+        let releaseCounter = 0; // 離れ判定用のカウンター
         let recordedX = [];
         let recordedY = [];
         let frameIndex = 0;
@@ -207,7 +276,6 @@
             minTrackingConfidence: 0.5
         });
 
-        // 点を描画する関数
         function drawPoint(landmark, color, size) {
             canvasCtx.beginPath();
             canvasCtx.arc(landmark.x * canvasElement.width, landmark.y * canvasElement.height, size, 0, 2 * Math.PI);
@@ -215,7 +283,6 @@
             canvasCtx.fill();
         }
 
-        // 線を描画する関数
         function drawLine(p1, p2, color, width) {
             canvasCtx.beginPath();
             canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
@@ -247,19 +314,16 @@
                 let wrist_l = landmarks[15];
                 let wrist_r = landmarks[16];
                 
-                // 打ち起こし・待機判定用に目のY座標計算は残す
                 let eye_y = (eye_l.y + eye_r.y) / 2.0;
                 let shoulder_width = Math.abs(shoulder_l.x - shoulder_r.x);
 
-                // 1. 蛍光緑の線を描画（肩〜肩、肩〜肘〜手首）
                 const neonGreen = "#39ff14";
-                drawLine(shoulder_l, shoulder_r, neonGreen, 4); // 両肩を結ぶ線
+                drawLine(shoulder_l, shoulder_r, neonGreen, 4); 
                 drawLine(shoulder_r, elbow_r, neonGreen, 4);
                 drawLine(elbow_r, wrist_r, neonGreen, 4);
                 drawLine(shoulder_l, elbow_l, neonGreen, 4);
                 drawLine(elbow_l, wrist_l, neonGreen, 4);
 
-                // 2. 赤い点を小さく（サイズ5）描画（目は描画しない）
                 const dotSize = 5;
                 drawPoint(shoulder_l, "red", dotSize);
                 drawPoint(shoulder_r, "red", dotSize);
@@ -270,6 +334,7 @@
 
                 if (state === "WAITING") {
                     statusText.innerText = "";
+                    releaseCounter = 0;
                     
                     if (wrist_r.y < eye_y && wrist_l.y < eye_y) {
                         triggerCounter += 1;
@@ -278,6 +343,7 @@
                             recordedX = [];
                             recordedY = [];
                             hasReachedKaiCandidate = false;
+                            releaseCounter = 0;
                             recordingStartTime = performance.now();
                         }
                     } else {
@@ -295,13 +361,25 @@
                         let recent_x = recordedX.slice(-15);
                         let recent_x_range = Math.max(...recent_x) - Math.min(...recent_x);
                         
+                        // X座標の変動が落ち着いたら会に到達したと仮定
                         if (recent_x_range < (shoulder_width * 0.05)) {
                             hasReachedKaiCandidate = true;
                         }
                         
                         if (hasReachedKaiCandidate) {
-                            let diff_spark = Math.abs(recordedX[recordedX.length - 1] - recordedX[recordedX.length - 3]);
-                            if (diff_spark > (shoulder_width * 0.15)) {
+                            // 「右肘、右手首、右肩」が順番に並んでいるか（昇順または降順）の判定
+                            let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_r.x) || 
+                                          (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_r.x);
+                            
+                            // 順番が崩れたらカウントアップ、元に戻ればリセット
+                            if (!inOrder) {
+                                releaseCounter++;
+                            } else {
+                                releaseCounter = 0;
+                            }
+                            
+                            // 3フレーム連続で順番が崩れたら「離れ」と判定
+                            if (releaseCounter >= 3) {
                                 state = "DONE";
                                 statusText.innerText = ""; 
                                 
@@ -322,13 +400,18 @@
                 }
                 
                 else if (state === "DONE") {
+                    // 手が目の下に戻ったら待機状態へリセット
                     if (wrist_r.y > eye_y && wrist_l.y > eye_y) {
                         state = "WAITING";
                         recordedX = [];
                         recordedY = [];
                         triggerCounter = 0;
+                        releaseCounter = 0;
                     }
                 }
+
+                // 毎フレームグラフを更新
+                drawGraph(recordedX);
             }
             canvasCtx.restore();
             frameIndex++;
@@ -347,7 +430,9 @@
             recordedX = [];
             recordedY = [];
             triggerCounter = 0;
+            releaseCounter = 0;
             statusText.innerText = "";
+            drawGraph(recordedX); // グラフもリセット
         });
     </script>
 </body>
