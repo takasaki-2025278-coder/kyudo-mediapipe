@@ -118,7 +118,7 @@
     </div>
     <script>
         // ==========================================
-        // 解析アルゴリズム関数（定数→直線→定数の総当たり法）
+        // 解析アルゴリズム関数
         // ==========================================
         function movingAverage(data, windowSize) {
             let result = [];
@@ -166,28 +166,28 @@
             return [m[0][3], m[1][3], m[2][3]];
         }
 
-        // Y軸ベースに変更された解析関数
-        function calculateKaiTimeHybrid(yData, timesData) {
+        // 会判定関数（大三の特定をX座標ベースで計算）
+        function calculateKaiTimeHybrid(xData, yData, timesData) {
             const windowSize = 5;
-            if (yData.length < windowSize * 2) {
+            if (yData.length < windowSize * 2 || xData.length < windowSize * 2) {
                 return { kaiSeconds: null, error: "Data too short" };
             }
 
+            const smoothedX = movingAverage(xData, windowSize);
             const smoothedY = movingAverage(yData, windowSize);
             const offset = Math.floor(windowSize / 2);
 
-            // ★変更: 大三の位置をY軸ベースで推定する
-            const kaiLen = Math.max(10, Math.min(30, Math.floor(smoothedY.length * 0.15)));
-            const kaiSlice = smoothedY.slice(-kaiLen);
-            const kaiApproxY = kaiSlice.reduce((sum, val) => sum + val, 0) / kaiSlice.length;
+            // ★変更: 大三の位置を「X座標で会から最も離れている位置」にする
+            const kaiLen = Math.max(10, Math.min(30, Math.floor(smoothedX.length * 0.15)));
+            const kaiSlice = smoothedX.slice(-kaiLen);
+            const kaiApproxX = kaiSlice.reduce((sum, val) => sum + val, 0) / kaiSlice.length;
 
-            const searchRange = Math.floor(smoothedY.length / 2);
+            const searchRange = Math.floor(smoothedX.length / 2);
             let maxDiff = -1;
             let daisanIdx = 0;
 
-            // 会のY座標（低い位置＝ピクセル値大）から最も遠いY座標（高い位置＝ピクセル値小）を大三とする
             for (let i = 0; i < searchRange; i++) {
-                const diff = Math.abs(smoothedY[i] - kaiApproxY);
+                const diff = Math.abs(smoothedX[i] - kaiApproxX);
                 if (diff > maxDiff) {
                     maxDiff = diff;
                     daisanIdx = i;
@@ -324,7 +324,7 @@
         // ==========================================
         // グラフ描画関数
         // ==========================================
-        function drawGraph(data, analysisData = null) {
+        function drawGraph(rawData, analysisData = null) {
             const gCanvas = document.getElementById('graph_canvas');
             const gCtx = gCanvas.getContext('2d');
             
@@ -335,7 +335,10 @@
             
             gCtx.clearRect(0, 0, gCanvas.width, gCanvas.height);
             
-            if (data.length < 2) return;
+            if (rawData.length < 2) return;
+
+            // ★変更: yにマイナス(-)を掛けてグラフの上下を反転（手が高い位置にある時、グラフ上側になるよう補正）
+            const data = rawData.map(y => -y);
             
             const padding = 20;
             const width = gCanvas.width - padding * 2;
@@ -349,7 +352,6 @@
             gCtx.strokeStyle = "#007bff";
             gCtx.lineWidth = 2;
             
-            // ピクセル座標は下に行くほど大きいため、そのまま描画すると直感的な動きに合致します
             for (let i = 0; i < data.length; i++) {
                 const x = padding + (i / (data.length - 1)) * width;
                 const y = padding + height - ((data[i] - minData) / range) * height;
@@ -438,7 +440,7 @@
                 recordingStartTime = 0;
                 triggerCounter = 0;
                 releaseCounter = 0;
-                drawGraph(recordedY, lastAnalysisResult); // ★ Y軸グラフのリセット表示
+                drawGraph(recordedY, lastAnalysisResult);
                 stopBtn.innerText = "再開";
             } else {
                 stopBtn.innerText = "停止";
@@ -551,17 +553,15 @@
                     recordedTimes.push(performance.now());
                     
                     if (recordedY.length > 30) {
-                        // ★変更: 会に入ったかのブレ判定も Y軸(高さの安定) でチェックする
                         let recent_y = recordedY.slice(-15);
                         let recent_y_range = Math.max(...recent_y) - Math.min(...recent_y);
                         
-                        // Y軸のブレが肩幅の5%未満に落ち着いたら「会の候補」とみなす
                         if (recent_y_range < (shoulder_width * 0.05)) {
                             hasReachedKaiCandidate = true;
                         }
                         
                         if (hasReachedKaiCandidate) {
-                            // 離れの検知条件は従来通り腕の並び順崩れを検知
+                            // ★変更: 右肘 > 右手首 > 左肩 または 右肘 < 右手首 < 左肩 でなくなった時に離れカウントを進める
                             let inOrder = (elbow_r.x > wrist_r.x && wrist_r.x > shoulder_l.x) || 
                                           (elbow_r.x < wrist_r.x && wrist_r.x < shoulder_l.x);
                             
@@ -588,11 +588,11 @@
                                 const cutCount = releaseCounter + SAFETY_BUFFER;
                                 
                                 if (recordedY.length > cutCount) {
+                                    const cleanX = recordedX.slice(0, recordedX.length - cutCount);
                                     const cleanY = recordedY.slice(0, recordedY.length - cutCount);
                                     const cleanTimes = recordedTimes.slice(0, recordedTimes.length - cutCount);
         
-                                    // ★変更: Y座標のみを解析に渡す
-                                    let result = calculateKaiTimeHybrid(cleanY, cleanTimes);
+                                    let result = calculateKaiTimeHybrid(cleanX, cleanY, cleanTimes);
                                     
                                     if (result.kaiSeconds !== null && result.kaiSeconds >= 0) {
                                         const li = document.createElement('li');
@@ -620,7 +620,6 @@
                     }
                 }
         
-                // ★変更: Y座標の推移をグラフに描画する
                 drawGraph(recordedY, lastAnalysisResult);
             }
             canvasCtx.restore();
@@ -642,7 +641,7 @@
             lastAnalysisResult = null;
             triggerCounter = 0;
             releaseCounter = 0;
-            drawGraph(recordedY, lastAnalysisResult); // ★リセット時もY軸グラフをクリア
+            drawGraph(recordedY, lastAnalysisResult);
         });
     </script>
 </body>
