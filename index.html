@@ -117,6 +117,19 @@
         </div>
     </div>
     <script>
+        function movingMedian(data, windowSize) {
+    const result = [];
+
+    for (let i = 0; i <= data.length - windowSize; i++) {
+        const window = data
+            .slice(i, i + windowSize)
+            .sort((a, b) => a - b);
+
+        result.push(window[Math.floor(windowSize / 2)]);
+    }
+
+    return result;
+}
         // ==========================================
         // 解析アルゴリズム関数
         // ==========================================
@@ -139,8 +152,8 @@
                 return { kaiSeconds: null, error: "Data too short" };
             }
 
-            const smoothedX = movingAverage(xData, windowSize);
-            const smoothedY = movingAverage(yData, windowSize);
+            const smoothedX = movingMedian(xData, windowSize);
+            const smoothedY = movingMedian(yData, windowSize);
             const offset = Math.floor(windowSize / 2);
 
             // 大三の位置を「X座標で会から最も離れている位置」として探索
